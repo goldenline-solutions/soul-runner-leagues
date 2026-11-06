@@ -1,0 +1,22 @@
+{
+  "name": "soul-runner-leagues",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js",
+    "db:setup": "node scripts/db-setup.js",
+    "db:sql": "node scripts/db-sql.js",
+    "db:backup": "node scripts/db-backup.js"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15"
+  }
+}

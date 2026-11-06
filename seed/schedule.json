@@ -1,0 +1,1110 @@
+{
+ "premier": [
+  {
+   "week": 1,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-10-23",
+   "label": "October 23\u201325, 2026",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Egypt"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Brazil"
+    },
+    {
+     "home": "Mexico",
+     "away": "Haiti"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Canada"
+    },
+    {
+     "home": "Serbia",
+     "away": "Switzerland"
+    },
+    {
+     "home": "India",
+     "away": "USA"
+    }
+   ]
+  },
+  {
+   "week": 2,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-10-30",
+   "label": "October 30 \u2013 November 1, 2026",
+   "series": [
+    {
+     "home": "Bangladesh",
+     "away": "Ireland"
+    },
+    {
+     "home": "Egypt",
+     "away": "Haiti"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Brazil"
+    },
+    {
+     "home": "Mexico",
+     "away": "Switzerland"
+    },
+    {
+     "home": "India",
+     "away": "Canada"
+    },
+    {
+     "home": "Serbia",
+     "away": "USA"
+    }
+   ]
+  },
+  {
+   "week": 3,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-06",
+   "label": "November 6\u20138, 2026",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Haiti"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Egypt",
+     "away": "Switzerland"
+    },
+    {
+     "home": "India",
+     "away": "Brazil"
+    },
+    {
+     "home": "Mexico",
+     "away": "USA"
+    },
+    {
+     "home": "Serbia",
+     "away": "Canada"
+    }
+   ]
+  },
+  {
+   "week": 4,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-13",
+   "label": "November 13\u201315, 2026",
+   "series": [
+    {
+     "home": "Saudi Arabia",
+     "away": "Ireland"
+    },
+    {
+     "home": "Haiti",
+     "away": "Switzerland"
+    },
+    {
+     "home": "India",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Egypt",
+     "away": "USA"
+    },
+    {
+     "home": "Serbia",
+     "away": "Brazil"
+    },
+    {
+     "home": "Mexico",
+     "away": "Canada"
+    }
+   ]
+  },
+  {
+   "week": 5,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-20",
+   "label": "November 20\u201322, 2026",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Switzerland"
+    },
+    {
+     "home": "India",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Haiti",
+     "away": "USA"
+    },
+    {
+     "home": "Serbia",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Egypt",
+     "away": "Canada"
+    },
+    {
+     "home": "Mexico",
+     "away": "Brazil"
+    }
+   ]
+  },
+  {
+   "week": 6,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-27",
+   "label": "November 27\u201329, 2026",
+   "series": [
+    {
+     "home": "India",
+     "away": "Ireland"
+    },
+    {
+     "home": "Switzerland",
+     "away": "USA"
+    },
+    {
+     "home": "Serbia",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Haiti",
+     "away": "Canada"
+    },
+    {
+     "home": "Mexico",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Egypt",
+     "away": "Brazil"
+    }
+   ]
+  },
+  {
+   "week": 7,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-12-04",
+   "label": "December 4\u20136, 2026",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "USA"
+    },
+    {
+     "home": "Serbia",
+     "away": "India"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Canada"
+    },
+    {
+     "home": "Mexico",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Haiti",
+     "away": "Brazil"
+    },
+    {
+     "home": "Egypt",
+     "away": "Bangladesh"
+    }
+   ]
+  },
+  {
+   "week": 8,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-12-11",
+   "label": "December 11\u201313, 2026",
+   "series": [
+    {
+     "home": "Serbia",
+     "away": "Ireland"
+    },
+    {
+     "home": "USA",
+     "away": "Canada"
+    },
+    {
+     "home": "Mexico",
+     "away": "India"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Brazil"
+    },
+    {
+     "home": "Egypt",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Haiti",
+     "away": "Bangladesh"
+    }
+   ]
+  },
+  {
+   "week": 9,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-12-18",
+   "label": "December 18\u201320, 2026",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Canada"
+    },
+    {
+     "home": "Mexico",
+     "away": "Serbia"
+    },
+    {
+     "home": "USA",
+     "away": "Brazil"
+    },
+    {
+     "home": "Egypt",
+     "away": "India"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Haiti",
+     "away": "Saudi Arabia"
+    }
+   ]
+  },
+  {
+   "week": 10,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-12-25",
+   "label": "December 25\u201327, 2026",
+   "series": [
+    {
+     "home": "Mexico",
+     "away": "Ireland"
+    },
+    {
+     "home": "Canada",
+     "away": "Brazil"
+    },
+    {
+     "home": "Egypt",
+     "away": "Serbia"
+    },
+    {
+     "home": "USA",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Haiti",
+     "away": "India"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Saudi Arabia"
+    }
+   ]
+  },
+  {
+   "week": 11,
+   "phase": "FIRST MEETINGS",
+   "start": "2027-01-01",
+   "label": "January 1\u20133, 2027",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Brazil"
+    },
+    {
+     "home": "Egypt",
+     "away": "Mexico"
+    },
+    {
+     "home": "Canada",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Haiti",
+     "away": "Serbia"
+    },
+    {
+     "home": "USA",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Switzerland",
+     "away": "India"
+    }
+   ]
+  },
+  {
+   "week": 12,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-01-08",
+   "label": "January 8\u201310, 2027",
+   "series": [
+    {
+     "home": "Egypt",
+     "away": "Ireland"
+    },
+    {
+     "home": "Brazil",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Haiti",
+     "away": "Mexico"
+    },
+    {
+     "home": "Canada",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Serbia"
+    },
+    {
+     "home": "USA",
+     "away": "India"
+    }
+   ]
+  },
+  {
+   "week": 13,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-01-15",
+   "label": "January 15\u201317, 2027",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Bangladesh"
+    },
+    {
+     "home": "Haiti",
+     "away": "Egypt"
+    },
+    {
+     "home": "Brazil",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Mexico"
+    },
+    {
+     "home": "Canada",
+     "away": "India"
+    },
+    {
+     "home": "USA",
+     "away": "Serbia"
+    }
+   ]
+  },
+  {
+   "week": 14,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-01-22",
+   "label": "January 22\u201324, 2027",
+   "series": [
+    {
+     "home": "Haiti",
+     "away": "Ireland"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Egypt"
+    },
+    {
+     "home": "Brazil",
+     "away": "India"
+    },
+    {
+     "home": "USA",
+     "away": "Mexico"
+    },
+    {
+     "home": "Canada",
+     "away": "Serbia"
+    }
+   ]
+  },
+  {
+   "week": 15,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-01-29",
+   "label": "January 29\u201331, 2027",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Saudi Arabia"
+    },
+    {
+     "home": "Switzerland",
+     "away": "Haiti"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "India"
+    },
+    {
+     "home": "USA",
+     "away": "Egypt"
+    },
+    {
+     "home": "Brazil",
+     "away": "Serbia"
+    },
+    {
+     "home": "Canada",
+     "away": "Mexico"
+    }
+   ]
+  },
+  {
+   "week": 16,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-02-05",
+   "label": "February 5\u20137, 2027",
+   "series": [
+    {
+     "home": "Switzerland",
+     "away": "Ireland"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "India"
+    },
+    {
+     "home": "USA",
+     "away": "Haiti"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Serbia"
+    },
+    {
+     "home": "Canada",
+     "away": "Egypt"
+    },
+    {
+     "home": "Brazil",
+     "away": "Mexico"
+    }
+   ]
+  },
+  {
+   "week": 17,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-02-12",
+   "label": "February 12\u201314, 2027",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "India"
+    },
+    {
+     "home": "USA",
+     "away": "Switzerland"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Serbia"
+    },
+    {
+     "home": "Canada",
+     "away": "Haiti"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Mexico"
+    },
+    {
+     "home": "Brazil",
+     "away": "Egypt"
+    }
+   ]
+  },
+  {
+   "week": 18,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-02-19",
+   "label": "February 19\u201321, 2027",
+   "series": [
+    {
+     "home": "USA",
+     "away": "Ireland"
+    },
+    {
+     "home": "India",
+     "away": "Serbia"
+    },
+    {
+     "home": "Canada",
+     "away": "Switzerland"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Mexico"
+    },
+    {
+     "home": "Brazil",
+     "away": "Haiti"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Egypt"
+    }
+   ]
+  },
+  {
+   "week": 19,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-02-26",
+   "label": "February 26\u201328, 2027",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Serbia"
+    },
+    {
+     "home": "Canada",
+     "away": "USA"
+    },
+    {
+     "home": "India",
+     "away": "Mexico"
+    },
+    {
+     "home": "Brazil",
+     "away": "Switzerland"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Egypt"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Haiti"
+    }
+   ]
+  },
+  {
+   "week": 20,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-03-05",
+   "label": "March 5\u20137, 2027",
+   "series": [
+    {
+     "home": "Canada",
+     "away": "Ireland"
+    },
+    {
+     "home": "Serbia",
+     "away": "Mexico"
+    },
+    {
+     "home": "Brazil",
+     "away": "USA"
+    },
+    {
+     "home": "India",
+     "away": "Egypt"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Switzerland"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Haiti"
+    }
+   ]
+  },
+  {
+   "week": 21,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-03-12",
+   "label": "March 12\u201314, 2027",
+   "series": [
+    {
+     "home": "Ireland",
+     "away": "Mexico"
+    },
+    {
+     "home": "Brazil",
+     "away": "Canada"
+    },
+    {
+     "home": "Serbia",
+     "away": "Egypt"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "USA"
+    },
+    {
+     "home": "India",
+     "away": "Haiti"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "Switzerland"
+    }
+   ]
+  },
+  {
+   "week": 22,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-03-19",
+   "label": "March 19\u201321, 2027",
+   "series": [
+    {
+     "home": "Brazil",
+     "away": "Ireland"
+    },
+    {
+     "home": "Mexico",
+     "away": "Egypt"
+    },
+    {
+     "home": "Bangladesh",
+     "away": "Canada"
+    },
+    {
+     "home": "Serbia",
+     "away": "Haiti"
+    },
+    {
+     "home": "Saudi Arabia",
+     "away": "USA"
+    },
+    {
+     "home": "India",
+     "away": "Switzerland"
+    }
+   ]
+  }
+ ],
+ "affiliate": [
+  {
+   "week": 1,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-06",
+   "label": "November 6\u20138, 2026",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "San Diego"
+    },
+    {
+     "home": "Detroit",
+     "away": "Pittsburgh"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "Miami"
+    }
+   ]
+  },
+  {
+   "week": 2,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-13",
+   "label": "November 13\u201315, 2026",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Pittsburgh"
+    },
+    {
+     "home": "San Diego",
+     "away": "Miami"
+    },
+    {
+     "home": "Detroit",
+     "away": "Las Vegas"
+    }
+   ]
+  },
+  {
+   "week": 3,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-20",
+   "label": "November 20\u201322, 2026",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Miami"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "Las Vegas"
+    },
+    {
+     "home": "San Diego",
+     "away": "Detroit"
+    }
+   ]
+  },
+  {
+   "week": 4,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-11-27",
+   "label": "November 27\u201329, 2026",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Las Vegas"
+    },
+    {
+     "home": "Miami",
+     "away": "Detroit"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "San Diego"
+    }
+   ]
+  },
+  {
+   "week": 5,
+   "phase": "FIRST MEETINGS",
+   "start": "2026-12-04",
+   "label": "December 4\u20136, 2026",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Detroit"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "San Diego"
+    },
+    {
+     "home": "Miami",
+     "away": "Pittsburgh"
+    }
+   ]
+  },
+  {
+   "week": 6,
+   "phase": "RETURN MEETINGS",
+   "start": "2026-12-11",
+   "label": "December 11\u201313, 2026",
+   "series": [
+    {
+     "home": "San Diego",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "Detroit"
+    },
+    {
+     "home": "Miami",
+     "away": "Las Vegas"
+    }
+   ]
+  },
+  {
+   "week": 7,
+   "phase": "RETURN MEETINGS",
+   "start": "2026-12-18",
+   "label": "December 18\u201320, 2026",
+   "series": [
+    {
+     "home": "Pittsburgh",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Miami",
+     "away": "San Diego"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "Detroit"
+    }
+   ]
+  },
+  {
+   "week": 8,
+   "phase": "RETURN MEETINGS",
+   "start": "2026-12-25",
+   "label": "December 25\u201327, 2026",
+   "series": [
+    {
+     "home": "Miami",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "Pittsburgh"
+    },
+    {
+     "home": "Detroit",
+     "away": "San Diego"
+    }
+   ]
+  },
+  {
+   "week": 9,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-01-01",
+   "label": "January 1\u20133, 2027",
+   "series": [
+    {
+     "home": "Las Vegas",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Detroit",
+     "away": "Miami"
+    },
+    {
+     "home": "San Diego",
+     "away": "Pittsburgh"
+    }
+   ]
+  },
+  {
+   "week": 10,
+   "phase": "RETURN MEETINGS",
+   "start": "2027-01-08",
+   "label": "January 8\u201310, 2027",
+   "series": [
+    {
+     "home": "Detroit",
+     "away": "Cleveland"
+    },
+    {
+     "home": "San Diego",
+     "away": "Las Vegas"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "Miami"
+    }
+   ]
+  },
+  {
+   "week": 11,
+   "phase": "THIRD MEETINGS",
+   "start": "2027-01-15",
+   "label": "January 15\u201317, 2027",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "San Diego"
+    },
+    {
+     "home": "Detroit",
+     "away": "Pittsburgh"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "Miami"
+    }
+   ]
+  },
+  {
+   "week": 12,
+   "phase": "THIRD MEETINGS",
+   "start": "2027-01-22",
+   "label": "January 22\u201324, 2027",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Pittsburgh"
+    },
+    {
+     "home": "San Diego",
+     "away": "Miami"
+    },
+    {
+     "home": "Detroit",
+     "away": "Las Vegas"
+    }
+   ]
+  },
+  {
+   "week": 13,
+   "phase": "THIRD MEETINGS",
+   "start": "2027-01-29",
+   "label": "January 29\u201331, 2027",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Miami"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "Las Vegas"
+    },
+    {
+     "home": "San Diego",
+     "away": "Detroit"
+    }
+   ]
+  },
+  {
+   "week": 14,
+   "phase": "THIRD MEETINGS",
+   "start": "2027-02-05",
+   "label": "February 5\u20137, 2027",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Las Vegas"
+    },
+    {
+     "home": "Miami",
+     "away": "Detroit"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "San Diego"
+    }
+   ]
+  },
+  {
+   "week": 15,
+   "phase": "THIRD MEETINGS",
+   "start": "2027-02-12",
+   "label": "February 12\u201314, 2027",
+   "series": [
+    {
+     "home": "Cleveland",
+     "away": "Detroit"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "San Diego"
+    },
+    {
+     "home": "Miami",
+     "away": "Pittsburgh"
+    }
+   ]
+  },
+  {
+   "week": 16,
+   "phase": "FOURTH MEETINGS",
+   "start": "2027-02-19",
+   "label": "February 19\u201321, 2027",
+   "series": [
+    {
+     "home": "San Diego",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "Detroit"
+    },
+    {
+     "home": "Miami",
+     "away": "Las Vegas"
+    }
+   ]
+  },
+  {
+   "week": 17,
+   "phase": "FOURTH MEETINGS",
+   "start": "2027-02-26",
+   "label": "February 26\u201328, 2027",
+   "series": [
+    {
+     "home": "Pittsburgh",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Miami",
+     "away": "San Diego"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "Detroit"
+    }
+   ]
+  },
+  {
+   "week": 18,
+   "phase": "FOURTH MEETINGS",
+   "start": "2027-03-05",
+   "label": "March 5\u20137, 2027",
+   "series": [
+    {
+     "home": "Miami",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Las Vegas",
+     "away": "Pittsburgh"
+    },
+    {
+     "home": "Detroit",
+     "away": "San Diego"
+    }
+   ]
+  },
+  {
+   "week": 19,
+   "phase": "FOURTH MEETINGS",
+   "start": "2027-03-12",
+   "label": "March 12\u201314, 2027",
+   "series": [
+    {
+     "home": "Las Vegas",
+     "away": "Cleveland"
+    },
+    {
+     "home": "Detroit",
+     "away": "Miami"
+    },
+    {
+     "home": "San Diego",
+     "away": "Pittsburgh"
+    }
+   ]
+  },
+  {
+   "week": 20,
+   "phase": "FOURTH MEETINGS",
+   "start": "2027-03-19",
+   "label": "March 19\u201321, 2027",
+   "series": [
+    {
+     "home": "Detroit",
+     "away": "Cleveland"
+    },
+    {
+     "home": "San Diego",
+     "away": "Las Vegas"
+    },
+    {
+     "home": "Pittsburgh",
+     "away": "Miami"
+    }
+   ]
+  }
+ ]
+}
