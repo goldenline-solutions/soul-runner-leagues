@@ -315,10 +315,10 @@ box.after = async (el, id) => {
     if (!rows.length) return `<p class="muted">No player lines recorded for ${esc(teamName(sides[side]))}.</p>`;
     const tot = Object.fromEntries(STAT_KEYS.map(k => [k, rows.reduce((t, r) => t + r[k], 0)]));
     const cells = r => `<td class="num">${r.pts}</td><td class="num">${r.reb}</td><td class="num">${r.ast}</td><td class="num">${r.stl}</td>
-      <td class="num">${r.blk}</td><td class="num">${r.tov}</td><td class="num">${r.pf}</td>
+      <td class="num">${r.blk}</td><td class="num">${r.pf}</td><td class="num">${r.tov}</td>
       <td class="num">${r.fgm}/${r.fga}</td><td class="num">${r.tpm}/${r.tpa}</td><td class="num">${r.ftm}/${r.fta}</td>`;
     return wrap(`<table class="data-table"><caption>${esc(teamName(sides[side]))}</caption>
-      <thead><tr><th>Player</th>${['PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'FG', '3PT', 'FT'].map(h => `<th class="num">${h}</th>`).join('')}</tr></thead>
+      <thead><tr><th>Player</th>${['PTS', 'REB', 'AST', 'STL', 'BLK', 'PF', 'TO', 'FG', '3PT', 'FT'].map(h => `<th class="num">${h}</th>`).join('')}</tr></thead>
       <tbody>${rows.map(r => `<tr><td><a href="#player/${r.player_id}">${esc(r.tag)}</a></td>${cells(r)}</tr>`).join('')}</tbody>
       <tfoot><tr><th>Team</th>${cells(tot)}</tr></tfoot></table>`);
   };

@@ -1,8 +1,8 @@
 // Shared state, API access and league math for every page.
 
 export const SLOTS = [['PG', '1 - PG'], ['SG', '2 - SG'], ['SF', '3 - SF'], ['PF', '4 - PF'], ['C', '5 - C'], ['6TH', '6th Man'], ['7TH', '7th Man']];
-export const STAT_KEYS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'pf', 'fgm', 'fga', 'tpm', 'tpa', 'ftm', 'fta'];
-export const STAT_LABELS = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', tov: 'TO', pf: 'PF', fgm: 'FGM', fga: 'FGA', tpm: '3PM', tpa: '3PA', ftm: 'FTM', fta: 'FTA' };
+export const STAT_KEYS = ['pts', 'reb', 'ast', 'stl', 'blk', 'pf', 'tov', 'fgm', 'fga', 'tpm', 'tpa', 'ftm', 'fta'];
+export const STAT_LABELS = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', pf: 'PF', tov: 'TO', fgm: 'FGM', fga: 'FGA', tpm: '3PM', tpa: '3PA', ftm: 'FTM', fta: 'FTA' };
 
 export const $ = (sel, el = document) => el.querySelector(sel);
 export const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];

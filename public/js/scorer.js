@@ -251,7 +251,7 @@ function teamEntry(side, s) {
     </table></div>
     <button class="btn-ghost btn-small" data-add-row="${side}">+ Add player</button>
     <details class="paste-box"><summary>Paste stat lines from a spreadsheet or chat</summary>
-      <p class="muted small">One player per line: tag, then PTS REB AST STL BLK TO PF FGM FGA 3PM 3PA FTM FTA. Pairs like 8/15 or 8-15 work too, and grades (A+, B-) are ignored.</p>
+      <p class="muted small">One player per line, in the same order as the 2K screen: tag, then PTS REB AST STL BLK PF TO FGM FGA 3PM 3PA FTM FTA. Pairs like 8/15 or 8-15 work too, and grades (A+, B-) are ignored.</p>
       <textarea data-paste="${side}" placeholder="Ace#1	24	6	5	2	0	3	2	9	15	3	6	3	4"></textarea>
       <button class="btn-ghost btn-small" data-apply-paste="${side}">Fill from pasted lines</button>
       <span class="msg" data-paste-msg="${side}"></span>
