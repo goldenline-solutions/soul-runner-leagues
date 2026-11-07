@@ -143,3 +143,34 @@ test('box score tags match a Steam tag when no Discord tag fits', async () => {
   assert.equal((await api.gameDetail(db, id)).lines[0].tag, 'Zed#7');
   await assert.rejects(saveGame(db, { series_id: s.id, game_number: 2, home_score: 20, away_score: 10, box: [line('home', 'Zed#7', 10), line('home', 'ZedHoops', 10)] }), /same player/);
 });
+
+test('saving a game puts unrostered players into empty slots of the team they played for', async () => {
+  const db = await fresh();
+  const s = await firstSeries(db);
+  await api.updateTeam(db, s.home_team_id, { roster: { PG: 'Ace', SG: 'B2', SF: 'B3', PF: 'B4', C: 'B5', '6TH': 'B6' } });
+  await api.updateTeam(db, s.away_team_id, { roster: { PG: 'Away1' } });
+  const { roster } = await api.recordGame(db, {
+    series_id: s.id, game_number: 1, home_score: 30, away_score: 20,
+    box: [line('home', 'Ace', 10), line('home', 'Newbie', 10), line('home', 'Extra', 10), line('away', 'Away1', 10), line('away', 'Away1', 0, { tag: 'Visitor' })],
+  });
+  assert.deepEqual(roster.added.map(p => p.tag), ['Newbie', 'Visitor']);
+  assert.deepEqual(roster.full.map(p => p.tag), ['Extra'], 'home roster had one empty slot');
+  const slot = async (team, tag) => (await db.get('SELECT rs.slot FROM roster_slots rs JOIN players p ON p.id = rs.player_id WHERE rs.team_id = ? AND p.discord_tag = ?', team, tag))?.slot;
+  assert.equal(await slot(s.home_team_id, 'Newbie'), '7TH');
+  assert.equal(await slot(s.away_team_id, 'Visitor'), 'SG');
+  assert.equal(await slot(s.away_team_id, 'Away1'), 'PG', 'existing slots untouched');
+});
+
+test('the desk fill uses every saved box score and the team a player played for most', async () => {
+  const db = await fresh();
+  const s = await firstSeries(db);
+  await saveGame(db, { series_id: s.id, game_number: 1, home_score: 2, away_score: 1, box: [line('home', 'Mover', 2), line('away', 'Solo', 1)] });
+  await saveGame(db, { series_id: s.id, game_number: 2, home_score: 1, away_score: 2, box: [line('away', 'Mover', 2)] });
+  await saveGame(db, { series_id: s.id, game_number: 3, home_score: 1, away_score: 2, box: [line('away', 'Mover', 2)] });
+  await db.run('UPDATE roster_slots SET player_id = NULL'); // pretend the games were saved before autofill existed
+  const r = await api.fillRostersFromGames(db);
+  assert.deepEqual(r.added.map(p => p.tag).sort(), ['Mover', 'Solo']);
+  const team = async tag => (await db.get('SELECT rs.team_id FROM roster_slots rs JOIN players p ON p.id = rs.player_id WHERE p.discord_tag = ?', tag)).team_id;
+  assert.equal(await team('Mover'), s.away_team_id);
+  assert.equal((await api.fillRostersFromGames(db)).added.length, 0, 'running it again adds nothing');
+});

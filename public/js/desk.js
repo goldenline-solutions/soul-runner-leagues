@@ -1,5 +1,6 @@
 // Commissioner's Desk: registrations inbox, news, All-Star, playoff seeding, backup.
-import { store, esc, api, $, teamsIn, standings, seriesGames, setMsg, formData } from './core.js';
+import { store, esc, api, $, teamsIn, standings, seriesGames, setMsg, formData, load } from './core.js';
+import { rosterNote } from './scorer.js';
 
 const LABELS = {
   discordTag: 'Discord', steamTag: 'Steam', recWinPercent: 'Rec Win %', fgShootingPercent: 'FG %',
@@ -29,6 +30,12 @@ export function desk() {
       <div class="reg-list">${store.data.news.map(n => `<div class="reg-card"><strong>${esc(n.title)}</strong>
         <span class="muted small"> · ${esc(n.published_at.slice(0, 10))}</span>
         <button class="btn-danger btn-small" data-del-news="${n.id}">Delete</button></div>`).join('')}</div>
+    </section>
+
+    <section class="registration-section"><h3>Rosters from box scores</h3>
+      <p class="muted">Saving a game puts anyone who isn't on a roster into an empty slot on the team they played for. This does the same for every game already saved. Nobody is moved or replaced.</p>
+      <button class="btn-ghost" data-fill-rosters>Fill empty roster slots</button>
+      <p class="msg" id="rosterMsg" role="status"></p>
     </section>
 
     <section class="registration-section"><h3>Playoff matchups</h3>
@@ -91,6 +98,15 @@ desk.after = async el => {
       return;
     }
     if (t.closest('[data-fill-qf]')) fillQuarterfinals(el);
+    if (t.closest('[data-fill-rosters]')) {
+      try {
+        const r = await api('/api/admin/rosters/fill', { method: 'POST', body: {} });
+        await load();
+        setMsg($('#rosterMsg', el), rosterNote(r).trim() || 'Nothing to add: everyone in a box score is already on a roster.', 'ok');
+      } catch (err) {
+        setMsg($('#rosterMsg', el), err.message, 'error');
+      }
+    }
   });
   el.addEventListener('submit', async e => {
     const form = e.target;

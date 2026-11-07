@@ -73,8 +73,30 @@ export async function playerIdForTag(db, tag, { steam = false } = {}) {
   return (await db.get('SELECT id FROM players WHERE lower(discord_tag) = lower(?)', tag)).id;
 }
 
-// Creates (gameId null) or replaces a game result plus its box score.
-export async function saveGame(db, input, gameId = null) {
+const ROSTER_ORDER = ['PG', 'SG', 'SF', 'PF', 'C', '6TH', '7TH'];
+
+// Puts players who aren't on any roster into the first empty slot of the team they played for.
+// Never moves or replaces anyone. entries: [{ team_id, player_id }] in priority order.
+// Returns { added: [{ tag, team }], full: [{ tag, team }] } (full: the team had no empty slot).
+export async function fillRosters(db, entries) {
+  const out = { added: [], full: [] };
+  const onRoster = new Set((await db.all('SELECT player_id FROM roster_slots WHERE player_id IS NOT NULL')).map(r => r.player_id));
+  for (const { team_id: teamId, player_id: playerId } of entries) {
+    if (onRoster.has(playerId)) continue;
+    onRoster.add(playerId);
+    const empty = (await db.all('SELECT slot FROM roster_slots WHERE team_id = ? AND player_id IS NULL', teamId)).map(r => r.slot);
+    const slot = ROSTER_ORDER.find(s => empty.includes(s));
+    const who = await db.get('SELECT p.discord_tag AS tag, t.name AS team FROM players p, teams t WHERE p.id = ? AND t.id = ?', playerId, teamId);
+    if (!slot) { out.full.push(who); continue; }
+    await db.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?', playerId, teamId, slot);
+    out.added.push(who);
+  }
+  return out;
+}
+
+// Creates (gameId null) or replaces a game result plus its box score. Players in the box score who
+// aren't on any roster join their team's empty slots; opts.onRoster receives what fillRosters did.
+export async function saveGame(db, input, gameId = null, opts = {}) {
   const existing = gameId ? await db.get('SELECT * FROM games WHERE id = ?', gameId) : null;
   if (gameId && !existing) throw new UserError('Game not found.', 404);
   const seriesId = existing ? existing.series_id : Number(input.series_id);
@@ -121,6 +143,8 @@ export async function saveGame(db, input, gameId = null) {
         VALUES (?, ?, ?, ${STAT_KEYS.map(() => '?').join(', ')})`,
       id, playerId, teamFor[row.side], ...STAT_KEYS.map(k => row[k]));
     }
+    const roster = await fillRosters(t, [...used.keys()].map((playerId, i) => ({ player_id: playerId, team_id: teamFor[box[i].side] })));
+    opts.onRoster?.(roster);
     if (screenshotId) {
       await t.run('UPDATE screenshots SET game_id = ? WHERE id = ? AND (game_id IS NULL OR game_id = ?)', id, screenshotId, id);
     }

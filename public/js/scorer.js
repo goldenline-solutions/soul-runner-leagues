@@ -519,13 +519,13 @@ async function save(el, button) {
   };
   button.disabled = true;
   try {
-    await api(S.editingId ? `/api/admin/games/${S.editingId}` : '/api/admin/games', { method: S.editingId ? 'PUT' : 'POST', body });
+    const { roster } = await api(S.editingId ? `/api/admin/games/${S.editingId}` : '/api/admin/games', { method: S.editingId ? 'PUT' : 'POST', body });
     const line = `${teamName(s.home_team_id)} ${body.home_score}–${body.away_score} ${teamName(s.away_team_id)}, Game ${S.gameNumber}`;
     await load();
     // Move on to the next game of the series, or the next open matchup that weekend.
     const rec = seriesRecord(store.data.seriesById.get(s.id));
     if (rec.decided) pickSeries(); else S.gameNumber = rec.games.length + 1;
-    S.flash = `Saved: ${esc(line)}.`;
+    S.flash = `Saved: ${esc(line)}.${rosterNote(roster)}`;
     S.warnings = [];
     S.shotUrl = null;
     S.appliedEdit = null;
@@ -535,6 +535,16 @@ async function save(el, button) {
     setMsg(msg, err.message, 'error');
     button.disabled = false;
   }
+}
+
+export function rosterNote({ added = [], full = [] } = {}) {
+  const byTeam = list => {
+    const teams = new Map();
+    for (const p of list) teams.set(p.team, [...(teams.get(p.team) || []), esc(p.tag)]);
+    return [...teams].map(([team, tags]) => `${esc(team)}: ${tags.join(', ')}`).join(' · ');
+  };
+  return (added.length ? ` Added to rosters (${byTeam(added)}).` : '')
+    + (full.length ? ` Roster full, not added (${byTeam(full)}).` : '');
 }
 
 async function remove(el) {

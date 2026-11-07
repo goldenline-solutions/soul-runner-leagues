@@ -34,12 +34,15 @@ Log in from the footer link ("Commissioner login") or the Upload Results tab.
   - type them in.
 
   Check the rows and save. Standings, schedules, stats, box scores and award candidates update
-  instantly. Recorded games can be edited or deleted from the same screen.
+  instantly. Recorded games can be edited or deleted from the same screen. Anyone in the box score
+  who isn't on a roster yet goes into the first empty slot (PG → 7th Man) of the team they played
+  for; nobody already on a roster is moved or replaced.
 - **Team cards** (Premier/Affiliate Teams → pick a team → Update Roster): owner, stream link,
   sponsors, affiliates and the 7 roster slots.
 - **Commissioner's Desk**: the registrations inbox (approving a player adds them to the league),
-  posts to Tyreek's Desk, playoff matchups ("Fill quarterfinals from standings"), All-Star details,
-  and **Download data backup**.
+  posts to Tyreek's Desk, **Fill empty roster slots** (the roster autofill, run over every saved
+  game), playoff matchups ("Fill quarterfinals from standings"), All-Star details, and
+  **Download data backup**.
 
 ## Screenshot reading
 

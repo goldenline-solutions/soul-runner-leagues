@@ -1,5 +1,5 @@
 import { ROSTER_SLOTS } from './seed.js';
-import { STAT_KEYS, UserError, saveGame, deleteGame, playerIdForTag } from './league.js';
+import { STAT_KEYS, UserError, saveGame, deleteGame, playerIdForTag, fillRosters } from './league.js';
 
 const sumCols = STAT_KEYS.map(k => `SUM(b.${k})::int AS ${k}`).join(', ');
 
@@ -158,6 +158,20 @@ export async function setRegistrationStatus(db, id, status) {
       await t.run("UPDATE players SET steam_tag = ? WHERE id = ? AND steam_tag = ''", data.steamTag, playerId);
     }
   });
+}
+
+// Saves a game and reports which players were added to rosters.
+export async function recordGame(db, body, gameId = null) {
+  let roster = { added: [], full: [] };
+  const id = await saveGame(db, body, gameId, { onRoster: r => { roster = r; } });
+  return { id, roster };
+}
+
+// Commissioner's Desk: fills empty roster slots from every saved box score. A player who played
+// for two teams goes to the one they played the most games for.
+export async function fillRostersFromGames(db) {
+  return db.tx(async t => fillRosters(t, await t.all(`SELECT team_id, player_id, COUNT(*) AS n, MIN(game_id) AS first
+    FROM box_scores GROUP BY team_id, player_id ORDER BY n DESC, first, player_id`)));
 }
 
 export async function updateTeam(db, id, body) {
