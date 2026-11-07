@@ -61,7 +61,14 @@ export function normalizeBox(rows = []) {
 }
 
 // Discord tags are unique ignoring case (players_tag index on lower(discord_tag)).
-export async function playerIdForTag(db, tag) {
+// steam: a tag that isn't anyone's Discord tag may still be a player's Steam tag (box scores).
+export async function playerIdForTag(db, tag, { steam = false } = {}) {
+  if (steam) {
+    const known = await db.get(`SELECT id FROM players WHERE lower(discord_tag) = lower(?)
+      OR (steam_tag <> '' AND lower(steam_tag) = lower(?))
+      ORDER BY (lower(discord_tag) = lower(?)) DESC, id LIMIT 1`, tag, tag, tag);
+    if (known) return known.id;
+  }
   await db.run('INSERT INTO players (discord_tag) VALUES (?) ON CONFLICT ((lower(discord_tag))) DO NOTHING', tag);
   return (await db.get('SELECT id FROM players WHERE lower(discord_tag) = lower(?)', tag)).id;
 }
@@ -105,10 +112,14 @@ export async function saveGame(db, input, gameId = null) {
       id = (await t.get(`INSERT INTO games (series_id, game_number, home_score, away_score, forfeit)
         VALUES (?, ?, ?, ?, ?) RETURNING id`, seriesId, game.game_number, game.home_score, game.away_score, game.forfeit)).id;
     }
+    const used = new Map(); // player id -> tag, since a Discord tag and a Steam tag can be one player
     for (const row of box) {
+      const playerId = await playerIdForTag(t, row.tag, { steam: true });
+      if (used.has(playerId)) throw new UserError(`${used.get(playerId)} and ${row.tag} are the same player (Discord and Steam tag).`);
+      used.set(playerId, row.tag);
       await t.run(`INSERT INTO box_scores (game_id, player_id, team_id, ${STAT_KEYS.join(', ')})
         VALUES (?, ?, ?, ${STAT_KEYS.map(() => '?').join(', ')})`,
-      id, await playerIdForTag(t, row.tag), teamFor[row.side], ...STAT_KEYS.map(k => row[k]));
+      id, playerId, teamFor[row.side], ...STAT_KEYS.map(k => row[k]));
     }
     if (screenshotId) {
       await t.run('UPDATE screenshots SET game_id = ? WHERE id = ? AND (game_id IS NULL OR game_id = ?)', id, screenshotId, id);

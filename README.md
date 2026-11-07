@@ -59,9 +59,12 @@ What's different for the league:
   commissioner confirms it, because a league game belongs to a specific matchup and game number.
 - **Sides are matched by roster.** A screenshot doesn't name teams, so its AWAY/HOME sides are
   matched onto the matchup's teams by roster overlap, then flipped if needed.
-- **Names are matched to league players.** The site checks Discord and Steam tags, exact first,
-  then fuzzy at the same 88% threshold the 2K-app uses. Unknown names are flagged, and AI players
-  are left out.
+- **Names are matched to league players.** The site checks Discord and Steam tags: an exact match
+  anywhere in the league first, then a 75% match on the two teams' rosters, then an 88% match
+  anywhere (the 2K-app threshold). Two rows never get the same player. Unknown names are flagged,
+  and AI players are left out. Nothing is created until you save.
+- **Saving matches tags exactly, ignoring case.** A box score name that is a player's Discord tag
+  or Steam tag goes to that player; any other name becomes a new player.
 - **The same image is never read twice.** Re-uploading it reuses the stored reading, so there's
   no second model charge.
 - **Big screenshots are shrunk in the browser** to about 2.4 MB of high-quality JPEG before upload

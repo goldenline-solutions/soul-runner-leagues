@@ -262,7 +262,8 @@ function teamEntry(side, s) {
 function rowHtml(side, r, i) {
   const note = r.ai
     ? `<span class="read-as">AI player · left out unless you change the name</span>`
-    : r.read_as && r.how === 'fuzzy' ? `<span class="read-as fuzzy">read as "${esc(r.read_as)}" · ${r.score}% match</span>`
+    : r.read_as && r.how === 'roster' ? `<span class="read-as fuzzy">read as "${esc(r.read_as)}" · ${r.score}% match on this matchup's rosters</span>`
+      : r.read_as && r.how === 'fuzzy' ? `<span class="read-as fuzzy">read as "${esc(r.read_as)}" · ${r.score}% match</span>`
       : r.read_as && !r.how ? `<span class="read-as">read as "${esc(r.read_as)}" · new player</span>` : '';
   return `<tr data-row="${i}" class="${r.ai ? 'ai' : ''}">
     <td><input class="tag" data-field="tag" list="playerTags" value="${esc(r.tag)}" aria-label="Player tag">${note}</td>

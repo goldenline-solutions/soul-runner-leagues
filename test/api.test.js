@@ -131,3 +131,15 @@ test('db/setup.sql is current and builds the same database on its own', async ()
   assert.equal(await n('_migrations'), 2);
   await lite.close();
 });
+
+test('box score tags match a Steam tag when no Discord tag fits', async () => {
+  const db = await fresh();
+  const s = await firstSeries(db);
+  await api.register(db, { kind: 'player', discordTag: 'Zed#7', steamTag: 'ZedHoops', recWinPercent: 61, fgShootingPercent: 50, threePtShootingPercent: 38 });
+  const [reg] = await api.listRegistrations(db);
+  await api.setRegistrationStatus(db, reg.id, 'approved');
+  const id = await saveGame(db, { series_id: s.id, game_number: 1, home_score: 20, away_score: 10, box: [line('home', 'zedhoops', 20)] });
+  assert.equal(await count(db, 'players'), 1, 'no new player for a known Steam tag');
+  assert.equal((await api.gameDetail(db, id)).lines[0].tag, 'Zed#7');
+  await assert.rejects(saveGame(db, { series_id: s.id, game_number: 2, home_score: 20, away_score: 10, box: [line('home', 'Zed#7', 10), line('home', 'ZedHoops', 10)] }), /same player/);
+});

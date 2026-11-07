@@ -10,6 +10,7 @@ import {
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const FUZZY_THRESHOLD = 88; // same cut-off the 2K-app fuzzy merge uses
+const ROSTER_THRESHOLD = 75; // looser cut-off for players on the two teams in this matchup
 
 export function ingestConfig(env) {
   return {
@@ -190,25 +191,31 @@ export function fuzzRatio(a, b) {
 
 const AI_NAME = /^(ai( player)?|cpu|player ?\d*)$/i;
 
-export function matchPlayer(players, name) {
+// Order: exact Discord/Steam tag anywhere in the league, then a close match on the two teams'
+// rosters (roster: Set of player ids), then a very close match anywhere. taken: ids already
+// given to another row of this screenshot.
+export function matchPlayer(players, name, { roster = null, taken = null } = {}) {
   const target = normalizeName(name);
   if (!target) return null;
-  for (const p of players) {
+  const free = players.filter(p => !taken?.has(p.id));
+  for (const p of free) {
     if (normalizeName(p.discord_tag) === target || (p.steam_tag && normalizeName(p.steam_tag) === target)) {
       return { player_id: p.id, tag: p.discord_tag, how: 'exact', score: 100 };
     }
   }
-  let best = null;
-  for (const p of players) {
-    for (const candidate of [p.discord_tag, p.steam_tag]) {
-      if (!candidate) continue;
-      const score = fuzzRatio(target, normalizeName(candidate));
-      if (score >= FUZZY_THRESHOLD && (!best || score > best.score)) {
-        best = { player_id: p.id, tag: p.discord_tag, how: 'fuzzy', score: Math.round(score) };
+  const closest = (pool, threshold, how) => {
+    let best = null;
+    for (const p of pool) {
+      for (const candidate of [p.discord_tag, p.steam_tag]) {
+        if (!candidate) continue;
+        const score = fuzzRatio(target, normalizeName(candidate));
+        if (score >= threshold && (!best || score > best.score)) best = { player_id: p.id, tag: p.discord_tag, how, score: Math.round(score) };
       }
     }
-  }
-  return best;
+    return best;
+  };
+  return (roster && closest(free.filter(p => roster.has(p.id)), ROSTER_THRESHOLD, 'roster'))
+    || closest(free, FUZZY_THRESHOLD, 'fuzzy');
 }
 
 // ---------- pipeline ----------
@@ -244,22 +251,40 @@ export async function buildDraft(db, data, seriesId) {
   const rosterTeam = new Map((await db.all('SELECT player_id, team_id FROM roster_slots WHERE player_id IS NOT NULL'))
     .map(r => [r.player_id, r.team_id]));
 
+  const series = seriesId ? await db.get('SELECT * FROM series WHERE id = ?', seriesId) : null;
+  const matchupTeams = [series?.home_team_id, series?.away_team_id].filter(Boolean);
+  const roster = matchupTeams.length
+    ? new Set([...rosterTeam].filter(([, team]) => matchupTeams.includes(team)).map(([id]) => id)) : null;
+
   const lines = [...(data.players || [])]
     .sort((a, b) => (a.side === b.side ? a.row_index - b.row_index : a.side === 'AWAY' ? -1 : 1))
     .map(p => {
       const readAs = cleanGamertag(p.gamertag);
       const ai = !readAs || AI_NAME.test(readAs);
-      const match = ai ? null : matchPlayer(players, readAs);
       const s = p.stats || {};
       return {
-        side2k: p.side, row_index: p.row_index, read_as: readAs || p.gamertag, ai, match,
-        tag: match ? match.tag : readAs,
+        side2k: p.side, row_index: p.row_index, read_as: readAs || p.gamertag, ai, match: null, tag: readAs,
         stats: {
           pts: s.pts, reb: s.reb, ast: s.ast, stl: s.stl, blk: s.blk, tov: s.tov, pf: s.fouls,
           fgm: s.fgm, fga: s.fga, tpm: s.tpm, tpa: s.tpa, ftm: s.ftm, fta: s.fta,
         },
       };
     });
+  // Exact names claim their player first, then the closest remaining matches, so two rows never
+  // point at the same player.
+  const taken = new Set();
+  const pending = lines.filter(l => !l.ai);
+  while (pending.length) {
+    let pick = null;
+    for (const l of pending) {
+      const m = matchPlayer(players, l.read_as, { roster, taken });
+      if (m && (!pick || m.score > pick.m.score)) pick = { l, m };
+    }
+    if (!pick) break;
+    Object.assign(pick.l, { match: pick.m, tag: pick.m.tag });
+    taken.add(pick.m.player_id);
+    pending.splice(pending.indexOf(pick.l), 1);
+  }
   backfillThrees(lines, warnings);
   for (const l of lines) {
     if (l.ai) warnings.push(`${l.side2k} row ${l.row_index + 1} looks like an AI player ("${l.read_as}"). It is left out unless you keep it.`);
@@ -267,7 +292,6 @@ export async function buildDraft(db, data, seriesId) {
   }
 
   let swap = false;
-  const series = seriesId ? await db.get('SELECT * FROM series WHERE id = ?', seriesId) : null;
   if (series?.home_team_id) {
     // score[k] counts matched players who sit on the expected roster for that mapping.
     const score = { straight: 0, swapped: 0 };

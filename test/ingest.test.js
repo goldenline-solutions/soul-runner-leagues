@@ -126,3 +126,20 @@ test('a crew-leader name read as a player triggers a retry with feedback', async
   assert.ok(!draft.lines.some(l => l.read_as === 'Leader'));
   assert.ok(!draft.warnings.some(w => w.includes('header row')));
 });
+
+test('matching tries the matchup rosters first and never gives one player to two rows', async () => {
+  const db = await connectLocal();
+  const series = await db.get("SELECT * FROM series WHERE stage = 'regular' ORDER BY id LIMIT 1");
+  const other = await db.get('SELECT id FROM teams WHERE id NOT IN (?, ?) LIMIT 1', series.home_team_id, series.away_team_id);
+  await api.updateTeam(db, series.home_team_id, { roster: { PG: 'Winnebago', SG: 'Blaze' } });
+  await api.updateTeam(db, other.id, { roster: { PG: 'Raymond Reddington' } });
+  // 82% like a roster player: matched. 76% like a player on another team: not matched (needs 88).
+  replies.push(extraction(['Winebag0', 'Blaze', 'Blazer', 'Raymond Red', 'x4'], ['h1', 'h2', 'h3', 'h4', 'h5']));
+  const draft = await ingestScreenshot(db, cfg, { image: png(5), series_id: series.id });
+  const row = name => draft.lines.find(l => l.read_as === name);
+  assert.equal(row('Winebag0').tag, 'Winnebago');
+  assert.equal(row('Winebag0').match.how, 'roster');
+  assert.equal(row('Blaze').match.how, 'exact');
+  assert.equal(row('Blazer').match, null, 'Blaze is already taken by the exact row');
+  assert.equal(row('Raymond Red').match, null);
+});
