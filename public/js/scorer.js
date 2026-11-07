@@ -208,7 +208,7 @@ function renderBody(el) {
       <div id="shotResult">${shotResult()}</div>
     </div>
     <div class="step">
-      <h3>2 · Check the box score</h3>
+      <div class="step-head"><h3>2 · Check the box score</h3><button type="button" class="btn-ghost btn-small" data-swap>⇄ Swap teams</button></div>
       <p class="muted">Each row is one player. Rows left blank are skipped. Highlighted rows have points that don't match 2×FGM + 3PM + FTM.</p>
       ${teamEntry('home', s)}${teamEntry('away', s)}
     </div>
@@ -369,6 +369,14 @@ async function onClick(el, e) {
     applyLines(side, lines);
     rerenderTeam(el, side);
     setMsg($(`[data-paste-msg="${side}"]`, el), lines.length ? `Filled ${lines.length} line${lines.length === 1 ? '' : 's'}.` : 'No stat lines found.', lines.length ? 'ok' : 'error');
+    return;
+  }
+  if (t.closest('[data-swap]')) {
+    // Moves every player line and score to the other team, for when the screenshot sides came out backwards.
+    for (const k of ['rows', 'scores', 'dirty']) S[k] = { home: S[k].away, away: S[k].home };
+    renderBody(el);
+    $('[data-swap]', el).focus();
+    setMsg($('#saveMsg', el), 'Swapped the players and scores of the two teams.', 'ok');
     return;
   }
   if (t.closest('[data-save]')) return save(el, t.closest('[data-save]'));

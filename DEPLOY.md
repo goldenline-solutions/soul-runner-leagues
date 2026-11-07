@@ -64,7 +64,7 @@ Vercel project → **Settings → Environment Variables**, for Production (and P
 | `ADMIN_PASSWORD` | the commissioner password |
 | `SESSION_SECRET` | a long random string; make one with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `OPENAI_API_KEY` | your OpenAI key (screenshot reading) |
-| `OPENAI_MODEL` | optional, defaults to `gpt-4o` |
+| `OPENAI_MODEL` | optional, defaults to `gpt-5` |
 | `INGEST_VALIDATE` | optional, `0` skips the "is this a 2K box score?" check |
 | `DATABASE_URL` | already there if you used the Storage tab |
 

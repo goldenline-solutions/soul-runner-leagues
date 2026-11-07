@@ -14,9 +14,10 @@ const FUZZY_THRESHOLD = 88; // same cut-off the 2K-app fuzzy merge uses
 export function ingestConfig(env) {
   return {
     apiKey: env.OPENAI_API_KEY || '',
-    model: env.OPENAI_MODEL || 'gpt-4o',
+    model: env.OPENAI_MODEL || 'gpt-5',
     baseUrl: (env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, ''),
     validate: env.INGEST_VALIDATE !== '0',
+    reasoningEffort: env.OPENAI_REASONING_EFFORT || 'low', // gpt-5 / o-series only
   };
 }
 
@@ -29,11 +30,12 @@ async function callModel(cfg, dataUrl, prompt, name, schema) {
     signal: AbortSignal.timeout(120e3),
     body: JSON.stringify({
       model: cfg.model,
-      temperature: 0,
+      // Reasoning models (gpt-5, o-series) only accept the default temperature.
+      ...(/^(gpt-5|o\d)/.test(cfg.model) ? { reasoning_effort: cfg.reasoningEffort } : { temperature: 0 }),
       response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
       messages: [{
         role: 'user',
-        content: [{ type: 'image_url', image_url: { url: dataUrl } }, { type: 'text', text: prompt }],
+        content: [{ type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }, { type: 'text', text: prompt }],
       }],
     }),
   });
@@ -51,7 +53,7 @@ async function validateScreenshot(cfg, dataUrl) {
   try {
     v = await callModel(cfg, dataUrl, VALIDATION_PROMPT, 'ScreenshotValidation', VALIDATION_SCHEMA);
   } catch (err) {
-    throw new UserError("Unable to validate screenshot. Please ensure you're uploading a valid NBA2K Rec box score screenshot. " +
+    throw new UserError("Unable to validate screenshot. Please ensure you're uploading a valid NBA 2K 5v5 box score screenshot. " +
       `Validation error: ${err.message}`);
   }
   const missing = [];
@@ -66,8 +68,8 @@ async function validateScreenshot(cfg, dataUrl) {
   }
   if (v.is_valid_rec_screenshot && !missing.length) return;
   const reason = [v.reason, missing.length ? `Missing required elements: ${missing.join(', ')}.` : ''].filter(Boolean).join('. ');
-  throw new UserError(`The uploaded image is not a valid NBA2K Rec box score screenshot. ${reason} ` +
-    'Please upload a screenshot from the Rec box score screen showing player statistics, team scores, and game information.');
+  throw new UserError(`The uploaded image is not a valid NBA 2K 5v5 box score screenshot. ${reason} ` +
+    'Please upload a screenshot from the game stats screen showing player statistics, team scores, and game information.');
 }
 
 export async function extractBoxScore(cfg, dataUrl, { retryOnError = true, feedback = null } = {}) {
@@ -123,10 +125,35 @@ export function integrityWarnings(data) {
     const sum = (data.players || []).filter(p => p.side === team.side).reduce((s, p) => s + (p.stats?.pts || 0), 0);
     if (sum !== team.totals?.pts) out.push(`${team.side} team: player points sum (${sum}) != team total (${team.totals?.pts})`);
   }
+  out.push(...headerWarnings(data));
+  // A stat line that doesn't add up was usually read from two different rows.
+  for (const p of data.players || []) {
+    const st = p.stats || {};
+    const expected = 2 * (st.fgm || 0) + (st.tpm || 0) + (st.ftm || 0);
+    if ((st.pts || 0) !== expected) {
+      out.push(`${p.side} row ${p.row_index + 1} (${p.gamertag}): PTS ${st.pts} doesn't match 2 x FGM + 3PM + FTM = ${expected}, re-read that row`);
+    }
+  }
   return out;
 }
 
-const isCritical = w => /player points sum|quarter scores sum/i.test(w);
+// The header-row name (crew leader) read as a player pushes every name one row off its stats.
+export function headerWarnings(data) {
+  const out = [];
+  for (const team of data.teams || []) {
+    const header = normalizeName(cleanGamertag(team.header_name));
+    if (!header) continue;
+    const hit = (data.players || []).find(p => p.side === team.side && p.row_index === 0 && normalizeName(cleanGamertag(p.gamertag)) === header);
+    const elsewhere = (data.players || []).filter(p => normalizeName(cleanGamertag(p.gamertag)) === header);
+    if (hit || elsewhere.length > 1) {
+      out.push(`"${cleanGamertag(team.header_name)}" is the name in the ${team.side} table's header row, not a player row: player names may be one row off their stats`);
+    }
+  }
+  return out;
+}
+
+const isCritical = w => /player points sum|quarter scores sum|header row|re-read that row/i.test(w);
+export const EXTRACTION_VERSION = 2; // bump when prompts change so stored readings are redone
 
 // ---------- names ----------
 
@@ -288,8 +315,9 @@ export async function ingestScreenshot(db, cfg, { image, series_id: seriesId }) 
   }
 
   let data, warnings;
-  if (known?.extracted) {
-    data = JSON.parse(known.extracted);
+  const stored = known?.extracted && JSON.parse(known.extracted);
+  if (stored?.extraction_version === EXTRACTION_VERSION) {
+    data = stored;
     warnings = JSON.parse(known.warnings);
   } else {
     if (!cfg.apiKey) throw new UserError('Screenshot reading is not set up yet: add OPENAI_API_KEY to the server settings.', 503);
@@ -312,6 +340,7 @@ export async function ingestScreenshot(db, cfg, { image, series_id: seriesId }) 
         }
       }
       for (const w of integrityWarnings(data)) if (!warnings.includes(w)) warnings.push(w);
+      data.extraction_version = EXTRACTION_VERSION;
     } catch (err) {
       if (err instanceof UserError) throw err;
       throw new UserError(`Extraction failed: ${err.message}`, 502);
@@ -330,7 +359,7 @@ export async function ingestScreenshot(db, cfg, { image, series_id: seriesId }) 
   if (dup) draft.warnings.unshift('Duplicate game found: same players with the same scores are already recorded.');
   return {
     screenshot_id: screenshot.id,
-    cached: Boolean(known?.extracted),
+    cached: stored?.extraction_version === EXTRACTION_VERSION,
     duplicate_game_id: dup,
     quarters: data.game.quarters,
     ...draft,

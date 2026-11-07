@@ -111,3 +111,18 @@ test('missing API key gives a clear message', async () => {
   const db = await connectLocal();
   await assert.rejects(ingestScreenshot(db, { ...cfg, apiKey: '' }, { image: png(3) }), /OPENAI_API_KEY/);
 });
+
+test('a crew-leader name read as a player triggers a retry with feedback', async () => {
+  const db = await connectLocal();
+  const shifted = extraction(['Leader', 'a1', 'a2', 'a3', 'a4'], ['h1', 'h2', 'h3', 'h4', 'h5']);
+  shifted.teams[0].header_name = 'Leader';
+  const fixed = extraction(['a1', 'a2', 'a3', 'a4', 'a5'], ['h1', 'h2', 'h3', 'h4', 'h5']);
+  fixed.teams[0].header_name = 'Leader';
+  replies.push(shifted, fixed);
+  const start = calls.length;
+  const draft = await ingestScreenshot(db, cfg, { image: png(4) });
+  const prompts = calls.slice(start).map(c => c.messages[0].content[1].text);
+  assert.ok(prompts.some(p => p.includes('"Leader" is the name in the AWAY table\'s header row')));
+  assert.ok(!draft.lines.some(l => l.read_as === 'Leader'));
+  assert.ok(!draft.warnings.some(w => w.includes('header row')));
+});

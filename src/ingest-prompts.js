@@ -27,7 +27,10 @@ export const VALIDATION_PROMPT =
   "- There are exactly 10 players total (5 per team)\n" +
   "- All other required elements are present\n" +
   "- It's a 5v5 Rec game format\n\n" +
-  "Be strict. Only mark as valid if you can clearly see ALL required elements of a complete 5v5 Rec box score with exactly 10 players (human or AI).";
+  "Be strict. Only mark as valid if you can clearly see ALL required elements of a complete 5v5 Rec box score with exactly 10 players (human or AI).\n\n" +
+  // This league plays crew / Pro-Am games, which the original Rec-only wording rejected.
+  "MODE: This league plays 5v5 games in any NBA 2K team mode. Rec, Pro-Am, crew games and private or league games are all VALID. " +
+  "Never reject a screenshot for being Pro-Am, crew or a custom team game instead of Rec. Treat every mention of Rec above as any 5v5 NBA 2K team game.";
 
 export const VALIDATION_SCHEMA = {
   type: 'object',
@@ -44,6 +47,20 @@ export const VALIDATION_SCHEMA = {
   additionalProperties: false,
 };
 
+// Added for this site after a real screenshot came back with every name one row off its stats:
+// the model took the name in each table's header row (the crew leader) for a player.
+const LAYOUT = '\n\n' +
+  'How the 2K GAME STATS screen is laid out:\n' +
+  '- There are two team tables, one above the other. The top table is AWAY, the bottom table is HOME.\n' +
+  '- Each table starts with a header row: one name on the left (the crew leader, crew name or team name), then the column labels ' +
+  '(GRD, PTS, REB, AST, STL, BLK, FOULS, TO, FGM/FGA, 3PM/3PA, FTM/FTA). That header name is NOT a player and has no stat line. ' +
+  'Put it in teams[].header_name and never in players. The same person may also appear as a player row; only the row under the header counts.\n' +
+  '- The 5 players of a team are the 5 rows between its header row and its TOTAL row. row_index 0 is the first row under the header.\n' +
+  '- Read every player row straight across: a name belongs to the numbers on the same horizontal line, never to the line above or below. ' +
+  'Check: PTS = 2 x FGM + 3PM + FTM for each row.\n' +
+  '- A highlighted (for example yellow) row is a normal player row. Labels like YOU, YOUR MATCHUP, TOTAL, QUIT or CLOSE are not players.\n' +
+  '- The large score beside each table on the scoreboard is that table\'s final score and equals its TOTAL PTS.';
+
 export const EXTRACTION_PROMPT =
   'Extract the stats exactly as shown. ' +
   "Preserve gamertags/player names exactly as displayed (including AI player names like 'AI Player', 'CPU', or generic names). " +
@@ -55,7 +72,8 @@ export const EXTRACTION_PROMPT =
   'Platform detection: Look specifically for a small circular icon or platform logo (e.g. PlayStation, Xbox, or a circle/dot) in front of each player name on the scoreboard. ' +
   'If you see such an icon before the names, set metadata.platform_hint to "Console" and metadata.has_platform_icons_before_names to true. ' +
   'If names start with normal text only (no icon), set metadata.platform_hint to "PC" or null and metadata.has_platform_icons_before_names to false. ' +
-  'Return only JSON per schema.';
+  'Return only JSON per schema.' +
+  LAYOUT;
 
 export function feedbackPrompt(feedback) {
   return `${EXTRACTION_PROMPT}\n\n` +
@@ -121,8 +139,13 @@ export const BOX_SCORE_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
-        properties: { side: SIDE, grade: { type: ['string', 'null'] }, totals: STATS },
-        required: ['side', 'grade', 'totals'],
+        properties: {
+          side: SIDE,
+          header_name: { type: ['string', 'null'], description: "The single name at the left of this table's header row (crew leader or team name). Not a player." },
+          grade: { type: ['string', 'null'] },
+          totals: STATS,
+        },
+        required: ['side', 'header_name', 'grade', 'totals'],
         additionalProperties: false,
       },
       minItems: 2,

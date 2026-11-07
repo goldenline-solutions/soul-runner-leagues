@@ -473,6 +473,8 @@ caption { text-align: left; caption-side: top; padding: 0 0 10px; font-family: v
 /* ---------- Upload Results ---------- */
 .step { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line); }
 .step h3 { font-size: 26px; font-weight: 800; }
+.step-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.step-head h3 { margin: 0; }
 .dropzone {
   display: block; padding: 34px 20px; text-align: center; cursor: pointer; color: var(--text-2);
   border: 1.5px dashed rgba(112, 234, 255, .3); border-radius: 18px; background: rgba(0, 207, 255, .03);

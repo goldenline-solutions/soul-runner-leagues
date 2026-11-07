@@ -73,7 +73,8 @@ What's different for the league:
 
 To turn it on, set `OPENAI_API_KEY` (in `.env` locally, or in the Vercel project settings). Optional settings:
 
-- `OPENAI_MODEL`: defaults to `gpt-4o`.
+- `OPENAI_MODEL`: defaults to `gpt-5`. `gpt-4o` is faster and cheaper but misreads names and stat rows on crew screenshots.
+- `OPENAI_REASONING_EFFORT`: `low` by default (gpt-5 only). `medium` reads a little more carefully but can take 2 to 4 minutes.
 - `INGEST_VALIDATE=0`: skips the validation call. Use this if league games get rejected by the
   "Rec box score" check.
 
