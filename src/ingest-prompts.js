@@ -30,7 +30,10 @@ export const VALIDATION_PROMPT =
   "Be strict. Only mark as valid if you can clearly see ALL required elements of a complete 5v5 Rec box score with exactly 10 players (human or AI).\n\n" +
   // This league plays crew / Pro-Am games, which the original Rec-only wording rejected.
   "MODE: This league plays 5v5 games in any NBA 2K team mode. Rec, Pro-Am, crew games and private or league games are all VALID. " +
-  "Never reject a screenshot for being Pro-Am, crew or a custom team game instead of Rec. Treat every mention of Rec above as any 5v5 NBA 2K team game.";
+  "Never reject a screenshot for being Pro-Am, crew or a custom team game instead of Rec. Treat every mention of Rec above as any 5v5 NBA 2K team game.\n\n" +
+  "COUNTING PLAYERS: each team table starts with a header row that shows one name (the crew leader, crew name or team name) " +
+  "followed by the column labels (GRD, PTS, REB...). That header name is NOT a player: do not count it. " +
+  "Count only the rows between the header row and the TOTAL row.";
 
 export const VALIDATION_SCHEMA = {
   type: 'object',

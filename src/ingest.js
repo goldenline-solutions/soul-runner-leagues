@@ -61,12 +61,11 @@ async function validateScreenshot(cfg, dataUrl) {
   if (!v.has_player_gamertags) missing.push('player gamertags');
   if (!v.has_team_scores) missing.push('team scores');
   if (!v.has_nba2k_interface) missing.push('NBA2K interface');
-  if (!v.is_5v5_game) {
-    missing.push(/3v3|2v2/i.test(v.reason)
-      ? '5v5 game format (only 5v5 Rec games are accepted, not 3v3 or 2v2)'
-      : '5v5 game format (must have exactly 10 players: 5 per team)');
-  }
-  if (v.is_valid_rec_screenshot && !missing.length) return;
+  // Only a clear 3v3/2v2 game is rejected for its player count. A miscount (a crew-leader name taken
+  // for a sixth player, or a player who left) goes on to extraction, where the commissioner sees every row.
+  const smallSided = !v.is_5v5_game && /3v3|2v2/i.test(v.reason);
+  if (smallSided) missing.push('5v5 game format (only 5v5 games are accepted, not 3v3 or 2v2)');
+  if (!missing.length && (v.is_valid_rec_screenshot || !v.is_5v5_game)) return;
   const reason = [v.reason, missing.length ? `Missing required elements: ${missing.join(', ')}.` : ''].filter(Boolean).join('. ');
   throw new UserError(`The uploaded image is not a valid NBA 2K 5v5 box score screenshot. ${reason} ` +
     'Please upload a screenshot from the game stats screen showing player statistics, team scores, and game information.');
