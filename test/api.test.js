@@ -83,12 +83,23 @@ test('stats aggregate regular season lines per player', async () => {
 test('registrations validate and stay private; approval creates the player', async () => {
   const db = await fresh();
   await assert.rejects(api.register(db, { kind: 'player', discordTag: 'x' }), /Steam Tag/);
-  await api.register(db, { kind: 'player', discordTag: 'Zed', steamTag: 'zed_s', recWinPercent: 61, fgShootingPercent: 50, threePtShootingPercent: 38 });
+  await api.register(db, { kind: 'player', discordTag: 'Zed', steamTag: 'zed_s', positions: 'PG, SG', recWinPercent: 61, fgShootingPercent: 50, threePtShootingPercent: 38 });
   const [reg] = await api.listRegistrations(db);
   assert.equal(reg.data.discordTag, 'Zed');
   assert.equal((await api.bootstrap(db, { admin: false })).players.length, 0);
   await api.setRegistrationStatus(db, reg.id, 'approved');
   assert.equal((await api.bootstrap(db, { admin: false })).players[0].tag, 'Zed');
+});
+
+test('free agent and owner registrations keep position(s)', async () => {
+  const db = await fresh();
+  await assert.rejects(api.register(db, { kind: 'player', discordTag: 'Ace', steamTag: 'ace', recWinPercent: 50, fgShootingPercent: 50, threePtShootingPercent: 30 }), /Position/);
+  await api.register(db, { kind: 'owner', steamTag: 'own', discordTag: 'Owner', crewName: 'Crew',
+    roster: [{ discordTag: 'One', positions: 'PG' }, { discordTag: 'Two', positions: 'SF, PF' }] });
+  const [reg] = await api.listRegistrations(db);
+  assert.deepEqual(reg.data.roster.slice(0, 3), [
+    { slot: 1, discordTag: 'One', positions: 'PG' }, { slot: 2, discordTag: 'Two', positions: 'SF, PF' }, { slot: 3, discordTag: '', positions: '' }]);
+  assert.equal(reg.data.roster.length, 7);
 });
 
 test('team update sets roster slots and rejects bad stream links', async () => {
@@ -128,14 +139,14 @@ test('db/setup.sql is current and builds the same database on its own', async ()
   const n = async t => (await lite.query(`SELECT COUNT(*)::int AS n FROM ${t}`)).rows[0].n;
   assert.equal(await n('teams'), 18);
   assert.equal(await n('series'), 199);
-  assert.equal(await n('_migrations'), 2);
+  assert.equal(await n('_migrations'), 3);
   await lite.close();
 });
 
 test('box score tags match a Steam tag when no Discord tag fits', async () => {
   const db = await fresh();
   const s = await firstSeries(db);
-  await api.register(db, { kind: 'player', discordTag: 'Zed#7', steamTag: 'ZedHoops', recWinPercent: 61, fgShootingPercent: 50, threePtShootingPercent: 38 });
+  await api.register(db, { kind: 'player', discordTag: 'Zed#7', steamTag: 'ZedHoops', positions: 'C', recWinPercent: 61, fgShootingPercent: 50, threePtShootingPercent: 38 });
   const [reg] = await api.listRegistrations(db);
   await api.setRegistrationStatus(db, reg.id, 'approved');
   const id = await saveGame(db, { series_id: s.id, game_number: 1, home_score: 20, away_score: 10, box: [line('home', 'zedhoops', 20)] });
@@ -173,4 +184,36 @@ test('the desk fill uses every saved box score and the team a player played for 
   const team = async tag => (await db.get('SELECT rs.team_id FROM roster_slots rs JOIN players p ON p.id = rs.player_id WHERE p.discord_tag = ?', tag)).team_id;
   assert.equal(await team('Mover'), s.away_team_id);
   assert.equal((await api.fillRostersFromGames(db)).added.length, 0, 'running it again adds nothing');
+});
+
+test('league rules save as pasted and show in bootstrap', async () => {
+  const db = await fresh();
+  assert.equal((await api.bootstrap(db, { admin: false })).rules, null);
+  await api.saveRules(db, { text: '  # Rules\r\n- Be on time  ' });
+  const { rules } = await api.bootstrap(db, { admin: false });
+  assert.equal(rules.text, '# Rules\n- Be on time');
+  assert.ok(rules.updated_at);
+  await assert.rejects(api.saveRules(db, { text: 'x'.repeat(api.RULES_MAX + 1) }), /too long/);
+});
+
+test('team logos: upload, versioned read, replace, remove', async () => {
+  const db = await fresh();
+  const { id } = await db.get('SELECT id FROM teams ORDER BY id LIMIT 1');
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  await assert.rejects(api.saveTeamLogo(db, id, { image: 'data:image/svg+xml;base64,PHN2Zz4=' }), /PNG, JPG or WebP/);
+  await assert.rejects(api.saveTeamLogo(db, id, { image: `data:image/png;base64,${Buffer.alloc(api.LOGO_MAX_BYTES + 1).toString('base64')}` }), /too large/);
+  await assert.rejects(api.readTeamLogo(db, id, false), /No logo/);
+  assert.equal((await api.saveTeamLogo(db, id, { image: `data:image/png;base64,${png.toString('base64')}` })).logo_version, 1);
+  const logo = await api.readTeamLogo(db, id, true);
+  assert.equal(logo.mime, 'image/png');
+  assert.deepEqual(logo.data, png);
+  assert.match(logo.cache, /immutable/);
+  assert.equal((await api.saveTeamLogo(db, id, { image: `data:image/webp;base64,${png.toString('base64')}` })).logo_version, 2);
+  assert.equal((await api.readTeamLogo(db, id, true)).mime, 'image/webp');
+  const team = (await api.bootstrap(db, { admin: false })).teams.find(t => t.id === id);
+  assert.equal(team.logo_version, 2);
+  await api.deleteTeamLogo(db, id);
+  await assert.rejects(api.readTeamLogo(db, id, true), /No logo/);
+  assert.equal((await api.bootstrap(db, { admin: false })).teams.find(t => t.id === id).logo_version, -2);
+  assert.equal((await api.saveTeamLogo(db, id, { image: `data:image/png;base64,${png.toString('base64')}` })).logo_version, 3, 'new URL after a removal');
 });

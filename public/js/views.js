@@ -1,10 +1,13 @@
 // Public pages. Each view returns HTML and may export an `after(el)` hook for wiring events.
 import {
   store, esc, api, $, $$, SLOTS, STAT_KEYS, STAT_LABELS, teamName, seriesGames, seriesRecord, standings, teamsIn,
-  winPct, signed, currentWeek, pad2, ratio, setMsg, formData, gameWinner,
+  winPct, signed, currentWeek, pad2, ratio, setMsg, formData, gameWinner, teamLogo,
 } from './core.js';
+import { renderDiscord } from './discord-md.js';
 
 // ---------- About ----------
+
+const GAME_URL = 'https://nba.2k.com/2k27/buy/'; // official NBA 2K27 buy page
 
 export function overview() {
   const d = store.data;
@@ -12,6 +15,12 @@ export function overview() {
   const next = currentWeek('premier') || currentWeek('affiliate');
   const latest = d.news[0];
   return `
+  <a class="game-banner" href="${GAME_URL}" target="_blank" rel="noopener noreferrer">
+    <span class="game-mark">NBA <b>2K27</b></span>
+    <span class="game-copy"><strong>Every league game is played on NBA 2K27 for PC.</strong><span>Don't have it yet? Get it from 2K.</span></span>
+    <span class="game-cta">Buy NBA 2K27 <span aria-hidden="true">↗</span></span>
+    <span class="visually-hidden">(opens the official NBA 2K site in a new tab)</span>
+  </a>
   <section class="hero">
     <div class="hero-copy">
       <div class="eyebrow">SEASON 1 · PREMIER + AFFILIATE LEAGUES</div>
@@ -97,24 +106,123 @@ export function teams(league) {
 }
 
 function teamCard(t, rec) {
-  const roster = store.data.rosterByTeam.get(t.id) || {};
-  const detail = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
-  const tba = v => (v ? esc(v) : 'To be announced');
   return `<article class="team">
-    <header class="team-head"><h3>${esc(t.name)}</h3>${rec?.gp ? `<span class="team-record">${rec.w}–${rec.l}</span>` : ''}</header>
-    <p class="team-sub">${rec?.gp ? `${rec.w}–${rec.l} in games · ${rec.sw}–${rec.sl} in matchups · ${signed(rec.diff)} point differential` : 'No games played yet'}</p>
-    <ol class="roster" aria-label="${esc(t.name)} roster">
-      ${SLOTS.map(([key, label]) => `<li><span class="pos" title="${esc(label)}">${key}</span>${roster[key]?.tag
-        ? `<a href="#player/${roster[key].player_id}">${esc(roster[key].tag)}</a>` : '<span class="tba">To be announced</span>'}</li>`).join('')}
-    </ol>
-    <dl class="team-details">
-      ${detail('Owner/Coach', tba(t.owner_coach))}
-      ${detail('Twitch.tv Stream', streamLink(t))}
-      ${detail('Sponsors', tba(t.sponsors))}
-      ${detail('Affiliated Team(s)', tba(t.affiliated_teams))}
-    </dl>
+    <header class="team-head"><a class="team-head-logo" href="#team/${t.id}" tabindex="-1" aria-hidden="true">${teamLogo(t, 'sm')}</a><h3><a href="#team/${t.id}">${esc(t.name)}</a></h3>${rec?.sw + rec?.sl ? `<span class="team-record">${rec.sw}–${rec.sl}</span>` : ''}</header>
+    <p class="team-sub">${rec?.gp ? `${rec.sw}–${rec.sl} in matchups · ${rec.w}–${rec.l} in games · ${signed(rec.diff)} point differential` : 'No games played yet'}</p>
+    ${rosterList(t)}
+    ${teamDetails(t)}
   </article>`;
 }
+
+function rosterList(t) {
+  const roster = store.data.rosterByTeam.get(t.id) || {};
+  return `<ol class="roster" aria-label="${esc(t.name)} roster">
+      ${SLOTS.map(([key, label]) => `<li><span class="pos" title="${esc(label)}">${key}</span>${roster[key]?.tag
+        ? `<a href="#player/${roster[key].player_id}">${esc(roster[key].tag)}</a>` : '<span class="tba">To be announced</span>'}</li>`).join('')}
+    </ol>`;
+}
+
+function teamDetails(t) {
+  const detail = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
+  const tba = v => (v ? esc(v) : 'To be announced');
+  return `<dl class="team-details">
+      ${detail('Owner/Coach', tba(t.owner_coach))}
+      ${detail('Twitch.tv Stream', streamLink(t))}
+      ${detail('Affiliated Team(s)', tba(t.affiliated_teams))}
+    </dl>`;
+}
+
+// Link to a team's own page.
+export const teamLink = id => (store.data.teamById.has(id) ? `<a href="#team/${id}">${esc(teamName(id))}</a>` : esc(teamName(id) || 'TBD'));
+
+// ---------- Team page (#team/ID): roster and details, record, matchups, player stats ----------
+
+const STAGE_ORDER = { regular: 0, qf: 1, sf: 2, final: 3 };
+
+export function team(id) {
+  const d = store.data;
+  const t = d.teamById.get(Number(id));
+  if (!t) return '<div class="panel"><h2>Team not found</h2><p><a href="#premier">See all teams</a></p></div>';
+  const league = d.leagueById.get(t.league_id);
+  const table = standings(t.league_id);
+  const rank = table.findIndex(r => r.team.id === t.id);
+  const rec = table[rank];
+  const teamsRoute = t.league_id === 'premier' ? 'premier' : 'affiliate';
+  const matchups = d.series
+    .filter(s => s.home_team_id === t.id || s.away_team_id === t.id)
+    .sort((a, b) => (STAGE_ORDER[a.stage] ?? 9) - (STAGE_ORDER[b.stage] ?? 9)
+      || (d.weekById.get(a.week_id)?.number ?? 0) - (d.weekById.get(b.week_id)?.number ?? 0) || a.id - b.id);
+  return `<div class="panel team-page">
+    <div class="page-head"><div class="team-title">
+      ${d.me.admin
+        ? `<button type="button" class="team-logo-btn" data-edit-team="${t.id}" title="${t.logo_version > 0 ? 'Change' : 'Upload'} the team logo">${teamLogo(t, 'lg')}<span class="logo-btn-label">${t.logo_version > 0 ? 'Change logo' : 'Add logo'}</span></button>`
+        : teamLogo(t, 'lg')}
+      <div><span class="eyebrow">${esc(league.name.toUpperCase())}</span>
+      <h2>${esc(t.name)}</h2></div>
+    </div><a class="promo-link ghost" href="#${teamsRoute}">All ${esc(league.name.replace(/ League$/, ''))} teams</a></div>
+    <div class="stats team-record-strip">
+      <div class="stat"><strong>${rec?.gp ? `#${rank + 1}` : '—'}</strong><span>IN THE STANDINGS OF ${table.length}</span></div>
+      <div class="stat"><strong>${rec.sw}–${rec.sl}</strong><span>MATCHUPS WON–LOST</span></div>
+      <div class="stat"><strong>${winPct(rec)}</strong><span>MATCHUP WIN %</span></div>
+      <div class="stat"><strong>${rec.w}–${rec.l}</strong><span>GAMES WON–LOST</span></div>
+      <div class="stat"><strong>${signed(rec.diff)}</strong><span>POINT DIFFERENTIAL</span></div>
+    </div>
+    <div class="team-page-grid">
+      <section class="team">
+        <h3 class="team-section-title">Roster</h3>
+        ${rosterList(t)}
+        ${teamDetails(t)}
+        ${d.me.admin ? `<div class="roster-actions"><button data-edit-team="${t.id}">Update Roster</button></div>` : ''}
+      </section>
+      <section class="team-player-stats">
+        <h3 class="team-section-title">Player Stats</h3>
+        <div id="teamStats"><p class="muted">Loading stats…</p></div>
+      </section>
+    </div>
+    <section class="team-matchups">
+      <h3 class="team-section-title">Matchups</h3>
+      ${matchups.length ? wrap(`<table class="data-table">
+        <thead><tr><th>Week</th><th>Opponent</th><th>Result</th><th>Games</th></tr></thead>
+        <tbody>${matchups.map(s => teamMatchupRow(s, t.id)).join('')}</tbody>
+      </table>`) : '<p class="muted">No matchups scheduled yet.</p>'}
+    </section>
+  </div>`;
+}
+
+function teamMatchupRow(s, teamId) {
+  const week = store.data.weekById.get(s.week_id);
+  const isHome = s.home_team_id === teamId;
+  const opp = isHome ? s.away_team_id : s.home_team_id;
+  const rec = seriesRecord(s);
+  const mine = isHome ? rec.home : rec.away, theirs = isHome ? rec.away : rec.home;
+  const result = rec.decided
+    ? `<span class="result ${rec.winner === teamId ? 'win' : 'loss'}">${rec.winner === teamId ? 'W' : 'L'} ${mine}–${theirs}</span>`
+    : rec.games.length ? `In progress · ${mine}–${theirs}` : `<span class="muted">${week ? esc(week.date_label) : 'Upcoming'}</span>`;
+  const games = rec.games.map(g => {
+    const score = isHome ? `${g.home_score}–${g.away_score}` : `${g.away_score}–${g.home_score}`;
+    const label = `G${g.game_number} ${score}${g.forfeit ? ' (F)' : ''}`;
+    return g.has_box ? `<a href="#box/${g.id}">${label}</a>` : label;
+  }).join(' · ');
+  return `<tr><td>${week ? `Wk ${pad2(week.number)}` : esc(s.label)}</td><td>${opp ? teamLink(opp) : 'TBD'}</td>
+    <td>${result}</td><td>${games || '—'}</td></tr>`;
+}
+
+team.after = async (el, id) => {
+  const t = store.data.teamById.get(Number(id));
+  if (!t) return;
+  const rows = (await api(`/api/stats?league=${t.league_id}&phase=all`))
+    .filter(r => r.team_id === t.id)
+    .sort((a, b) => b.pts / b.gp - a.pts / a.gp || a.tag.localeCompare(b.tag));
+  const body = $('#teamStats', el);
+  if (!body) return;
+  body.innerHTML = rows.length ? wrap(`<table class="data-table">
+    <thead><tr><th>Player</th>${STAT_COLUMNS.map(([, label]) => `<th class="num">${label}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr><td><a href="#player/${r.player_id}">${esc(r.tag)}</a></td><td class="num">${r.gp}</td>
+      ${['pts', 'reb', 'ast', 'stl', 'blk', 'tov'].map(k => `<td class="num">${(r[k] / r.gp).toFixed(1)}</td>`).join('')}
+      <td class="num">${ratio(r.fgm, r.fga)}</td><td class="num">${ratio(r.tpm, r.tpa)}</td><td class="num">${ratio(r.ftm, r.fta)}</td></tr>`).join('')}
+    </tbody></table>`) + '<p class="muted">Per-game averages over every game played for this team, playoffs included.</p>'
+    : '<p>No box scores recorded for this team yet.</p>';
+};
 
 function streamLink(t) {
   return t?.stream_url
@@ -203,16 +311,16 @@ function seriesTable(s, home, away, rec) {
 
 export function standingsView() {
   return `<div class="panel"><h2>Standings</h2>
-    <p>Ranked by game win percentage, then point differential. Every game of every best-of-3 counts, and so does winning the week.</p>
+    <p>Ranked by matchup win percentage: each best-of-3 is one win or loss. Ties are broken by game win percentage, then point differential.</p>
     ${store.data.leagues.map(l => {
       const rows = standings(l.id);
       return `<h3 class="eyebrow league-label">${esc(l.name.toUpperCase())}</h3>
       ${wrap(`<table class="data-table standings">
-        <thead><tr><th>#</th><th>Team</th><th class="num">GP</th><th class="num">W</th><th class="num">L</th><th class="num">PCT</th><th class="num">DIFF</th><th class="num">WEEKS WON</th></tr></thead>
+        <thead><tr><th>#</th><th>Team</th><th class="num"><abbr title="Matchups won">W</abbr></th><th class="num"><abbr title="Matchups lost">L</abbr></th><th class="num"><abbr title="Matchup win percentage">PCT</abbr></th><th class="num"><abbr title="Games won and lost">GAMES</abbr></th><th class="num"><abbr title="Point differential">DIFF</abbr></th></tr></thead>
         <tbody>${rows.map((r, i) => `<tr class="${l.id === 'premier' && i === 7 ? 'playoff-line' : ''}">
-          <td class="rank${l.id === 'premier' && i < 8 ? ' seed' : ''}">${i + 1}</td><td><a href="#${l.id}?team=${r.team.id}">${esc(r.team.name)}</a></td>
-          <td class="num">${r.gp}</td><td class="num">${r.w}</td><td class="num">${r.l}</td><td class="num">${winPct(r)}</td>
-          <td class="num">${signed(r.diff)}</td><td class="num">${r.sw}–${r.sl}</td></tr>`).join('')}</tbody>
+          <td class="rank${l.id === 'premier' && i < 8 ? ' seed' : ''}">${i + 1}</td><td><a href="#team/${r.team.id}">${esc(r.team.name)}</a></td>
+          <td class="num">${r.sw}</td><td class="num">${r.sl}</td><td class="num">${winPct(r)}</td>
+          <td class="num">${r.w}–${r.l}</td><td class="num">${signed(r.diff)}</td></tr>`).join('')}</tbody>
       </table>`)}
       ${l.id === 'premier' ? '<p class="muted">Dashed line: the top eight teams qualify for the playoffs.</p>' : ''}`;
     }).join('')}
@@ -227,12 +335,17 @@ const STAT_COLUMNS = [
   ['spg', 'SPG', r => r.stl / r.gp], ['bpg', 'BPG', r => r.blk / r.gp], ['tpg', 'TO', r => r.tov / r.gp],
   ['fgp', 'FG%', r => (r.fga ? r.fgm / r.fga : -1)], ['tpp', '3P%', r => (r.tpa ? r.tpm / r.tpa : -1)], ['ftp', 'FT%', r => (r.fta ? r.ftm / r.fta : -1)],
 ];
-const statState = { league: 'premier', phase: 'regular', sort: 'ppg', dir: -1, rows: [] };
+// Text columns sort A to Z on the first click; number columns sort highest first.
+const TEXT_SORTS = { player: r => r.tag, team: r => r.team };
+const statState = { league: 'premier', phase: 'regular', team: '', sort: 'ppg', dir: -1, rows: [] };
+const teamOptions = () => `<option value="">All teams</option>${teamsIn(statState.league).map(t =>
+  `<option value="${t.id}" ${String(t.id) === statState.team ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}`;
 
 export function stats() {
   return `<div class="panel"><h2>Player statistics</h2>
     <div class="toolbar">
       <label>League <select data-stat="league">${store.data.leagues.map(l => `<option value="${l.id}" ${statState.league === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></label>
+      <label>Team <select data-stat="team">${teamOptions()}</select></label>
       <label>Games <select data-stat="phase">
         <option value="regular" ${statState.phase === 'regular' ? 'selected' : ''}>Regular season</option>
         <option value="playoffs" ${statState.phase === 'playoffs' ? 'selected' : ''}>Playoffs</option>
@@ -248,12 +361,17 @@ stats.after = async el => {
     const key = e.target.dataset.stat;
     if (!key) return;
     statState[key] = e.target.value;
+    if (key === 'team') return renderStatsTable(el);
+    if (key === 'league') {
+      statState.team = '';
+      $('[data-stat="team"]', el).innerHTML = teamOptions();
+    }
     fetchStats(el);
   });
   el.addEventListener('click', e => {
     const key = e.target.closest('[data-sort]')?.dataset.sort;
     if (!key) return;
-    statState.dir = statState.sort === key ? -statState.dir : -1;
+    statState.dir = statState.sort === key ? -statState.dir : TEXT_SORTS[key] ? 1 : -1;
     statState.sort = key;
     renderStatsTable(el);
   });
@@ -266,14 +384,20 @@ async function fetchStats(el) {
 }
 
 function renderStatsTable(el) {
-  const rows = statState.rows;
+  const rows = statState.rows.filter(r => !statState.team || String(r.team_id) === statState.team);
   const body = $('#statsBody', el);
   if (!rows.length) {
-    body.innerHTML = '<p>No box scores recorded yet. Leaderboards fill in as soon as the first game is uploaded.</p>';
+    body.innerHTML = statState.rows.length
+      ? `<p>No box scores recorded for ${esc(teamName(Number(statState.team)))} yet.</p>`
+      : '<p>No box scores recorded yet. Leaderboards fill in as soon as the first game is uploaded.</p>';
     return;
   }
-  const col = STAT_COLUMNS.find(c => c[0] === statState.sort);
-  const sorted = [...rows].sort((a, b) => (col[2](b) - col[2](a)) * -statState.dir || a.tag.localeCompare(b.tag));
+  const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+  const text = TEXT_SORTS[statState.sort];
+  const num = (STAT_COLUMNS.find(c => c[0] === statState.sort) || STAT_COLUMNS[1])[2];
+  const sorted = [...rows].sort((a, b) => (text ? byName(text(a), text(b)) : num(a) - num(b)) * statState.dir
+    || byName(a.tag, b.tag));
+  const sortHead = (key, label, cls = '') => `<th${cls ? ` class="${cls}"` : ''} ${statState.sort === key ? `aria-sort="${statState.dir < 0 ? 'descending' : 'ascending'}"` : ''}><button data-sort="${key}">${label}</button></th>`;
   const leader = (key, label, fn) => {
     const top = [...rows].sort((a, b) => fn(b) - fn(a))[0];
     return `<div class="stat"><strong>${fn(top).toFixed(1)}</strong><span>${label}</span><em>${esc(top.tag)} · ${esc(top.team)}</em></div>`;
@@ -287,10 +411,10 @@ function renderStatsTable(el) {
       ${leader('bpg', 'BLOCKS PER GAME', r => r.blk / r.gp)}
     </div>
     ${wrap(`<table class="data-table">
-      <thead><tr><th>Player</th><th>Team</th>
-        ${STAT_COLUMNS.map(([key, label]) => `<th class="num" ${statState.sort === key ? `aria-sort="${statState.dir < 0 ? 'descending' : 'ascending'}"` : ''}><button data-sort="${key}">${label}</button></th>`).join('')}
+      <thead><tr>${sortHead('player', 'Player')}${sortHead('team', 'Team')}
+        ${STAT_COLUMNS.map(([key, label]) => sortHead(key, label, 'num')).join('')}
       </tr></thead>
-      <tbody>${sorted.map(r => `<tr><td><a href="#player/${r.player_id}">${esc(r.tag)}</a></td><td>${esc(r.team)}</td>
+      <tbody>${sorted.map(r => `<tr><td><a href="#player/${r.player_id}">${esc(r.tag)}</a></td><td>${teamLink(r.team_id)}</td>
         <td class="num">${r.gp}</td>
         ${['pts', 'reb', 'ast', 'stl', 'blk', 'tov'].map(k => `<td class="num">${(r[k] / r.gp).toFixed(1)}</td>`).join('')}
         <td class="num">${ratio(r.fgm, r.fga)}</td><td class="num">${ratio(r.tpm, r.tpa)}</td><td class="num">${ratio(r.ftm, r.fta)}</td></tr>`).join('')}
@@ -326,9 +450,9 @@ box.after = async (el, id) => {
     <h2>Box Score</h2>
     <p class="eyebrow">${week ? `WEEKEND ${pad2(week.number)} · ${esc(week.phase)}` : esc(s.label.toUpperCase())} · GAME ${game.game_number}</p>
     <div class="box-head">
-      <div class="${won === 'home' ? 'won' : ''}"><span class="team-score">${game.home_score}</span><span class="team-name">${esc(teamName(s.home_team_id))}</span>${game.forfeit === 'home' ? '<br><span class="badge">FORFEITED</span>' : ''}</div>
+      <div class="${won === 'home' ? 'won' : ''}"><span class="team-score">${game.home_score}</span><span class="team-name">${teamLink(s.home_team_id)}</span>${game.forfeit === 'home' ? '<br><span class="badge">FORFEITED</span>' : ''}</div>
       <span class="fixture-vs">FINAL</span>
-      <div class="${won === 'away' ? 'won' : ''}"><span class="team-score">${game.away_score}</span><span class="team-name">${esc(teamName(s.away_team_id))}</span>${game.forfeit === 'away' ? '<br><span class="badge">FORFEITED</span>' : ''}</div>
+      <div class="${won === 'away' ? 'won' : ''}"><span class="team-score">${game.away_score}</span><span class="team-name">${teamLink(s.away_team_id)}</span>${game.forfeit === 'away' ? '<br><span class="badge">FORFEITED</span>' : ''}</div>
     </div>
     ${table('home')}${table('away')}
     <p>${shot ? `<a href="/api/screenshots/${shot}" target="_blank" rel="noopener">View the original screenshot ↗</a> · ` : ''}
@@ -359,7 +483,7 @@ player.after = async (el, id) => {
       <tbody>${games.map(g => {
         const opp = g.team_id === g.home_team_id ? g.away_team_id : g.home_team_id;
         return `<tr><td><a href="#box/${g.game_id}">${g.week ? `Wk ${pad2(g.week)}` : esc(g.label)} · G${g.game_number}</a></td>
-          <td>${esc(teamName(g.team_id))}</td><td>${esc(teamName(opp))}</td>
+          <td>${teamLink(g.team_id)}</td><td>${teamLink(opp)}</td>
           <td class="num">${g.pts}</td><td class="num">${g.reb}</td><td class="num">${g.ast}</td><td class="num">${g.stl}</td><td class="num">${g.blk}</td>
           <td class="num">${g.tov}</td><td class="num">${g.fgm}/${g.fga}</td><td class="num">${g.tpm}/${g.tpa}</td><td class="num">${g.ftm}/${g.fta}</td></tr>`;
       }).join('')}</tbody></table>`) : '<p>No games recorded yet.</p>'}`;
@@ -461,27 +585,20 @@ export function playoffs() {
 
 // ---------- Registration ----------
 
-export function registration() {
+// Registration: one form at a time, picked by the links at the top (#players?form=...).
+const REG_FORMS = [
+  ['sponsor', 'Sponsorship'],
+  ['player', 'Free Agent'],
+  ['owner', 'Owner'],
+];
+
+export function registration(_id, query) {
+  const current = REG_FORMS.some(([k]) => k === query?.get('form')) ? query.get('form') : 'sponsor';
   const field = (name, label, type = 'text', extra = 'required') => `<label>${label}<input name="${name}" type="${type}" ${extra}></label>`;
   const pct = (name, label) => field(name, label, 'number', 'min="0" max="100" step="0.01" required');
   const honey = '<label class="honey" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>';
-  return `<div class="panel"><h2>Registration</h2>
-    <p>Registrations go straight to the commissioner. Contact details are never shown on the public site.</p>
-    <section class="registration-section"><h3>Player Registration</h3>
-      <form class="registration-form" data-register="player"><div class="registration-grid">
-        ${field('discordTag', 'Discord Tag')}${field('steamTag', 'Steam Tag')}
-        ${pct('recWinPercent', 'Rec Win %')}${pct('fgShootingPercent', 'FG Shooting %')}${pct('threePtShootingPercent', '3-pt Shooting %')}
-      </div>${honey}<button>Submit player registration</button><p class="msg" role="status" aria-live="polite"></p></form>
-    </section>
-    <section class="registration-section"><h3>Owner Registration</h3>
-      <form class="registration-form" data-register="owner"><div class="registration-grid">
-        ${field('steamTag', 'Steam Tag')}${field('discordTag', 'Discord Tag')}${field('crewName', 'Crew Name')}
-        <fieldset class="roster-fields"><legend>Roster Slots</legend><div class="registration-grid">
-          ${['1 PG', '2 SG', '3 SF', '4 PF', '5 C', '6th Man', '7th Man'].map((s, i) => field(`roster${i}`, s, 'text', 'placeholder="Discord Tag"')).join('')}
-        </div></fieldset>
-      </div>${honey}<button>Submit owner registration</button><p class="msg" role="status" aria-live="polite"></p></form>
-    </section>
-    <section class="registration-section"><h3>Sponsorship Interest</h3>
+  const forms = {
+    sponsor: `<section class="registration-section"><h3>Sponsorship Interest</h3>
       <form class="registration-form" data-register="sponsor"><div class="registration-grid">
         <fieldset class="result-status"><legend>Sponsor type</legend>
           <label><input type="radio" name="type" value="Company" checked><span>Company</span></label>
@@ -490,12 +607,35 @@ export function registration() {
         ${field('name', 'Name')}${field('email', 'Contact E-mail', 'email')}${field('phone', 'Contact Phone', 'tel', '')}
         <label class="wide-field">Product or personal description<textarea name="description" rows="4" required></textarea></label>
       </div>${honey}<button>Submit sponsorship interest</button><p class="msg" role="status" aria-live="polite"></p></form>
-    </section>
+    </section>`,
+    player: `<section class="registration-section"><h3>Free Agent Registration</h3>
+      <form class="registration-form" data-register="player"><div class="registration-grid">
+        ${field('discordTag', 'Discord Tag')}${field('steamTag', 'Steam Tag')}
+        ${field('positions', 'Position(s)', 'text', 'required maxlength="40" placeholder="e.g. PG, SG"')}
+        ${pct('recWinPercent', 'Rec Win %')}${pct('fgShootingPercent', 'FG Shooting %')}${pct('threePtShootingPercent', '3-pt Shooting %')}
+      </div>${honey}<button>Submit free agent registration</button><p class="msg" role="status" aria-live="polite"></p></form>
+    </section>`,
+    owner: `<section class="registration-section"><h3>Owner Registration</h3>
+      <form class="registration-form" data-register="owner"><div class="registration-grid">
+        ${field('steamTag', 'Steam Tag')}${field('discordTag', 'Discord Tag')}${field('crewName', 'Crew Name')}
+        <fieldset class="roster-fields"><legend>Roster</legend><div class="owner-roster">
+          ${[1, 2, 3, 4, 5, 6, 7].map(n => `<div class="owner-roster-row"><span class="pos" aria-hidden="true">${n}</span>
+            ${field(`roster${n - 1}`, `<span class="visually-hidden">Player ${n} </span>Discord Tag`, 'text', 'maxlength="64" placeholder="Discord Tag"')}
+            ${field(`positions${n - 1}`, `<span class="visually-hidden">Player ${n} </span>Position(s)`, 'text', 'maxlength="40" placeholder="e.g. PG, SG"')}</div>`).join('')}
+        </div></fieldset>
+      </div>${honey}<button>Submit owner registration</button><p class="msg" role="status" aria-live="polite"></p></form>
+    </section>`,
+  };
+  return `<div class="panel"><div class="page-head"><h2>Registration</h2>
+      <nav class="seg" aria-label="Registration type">${REG_FORMS.map(([k, label]) =>
+        `<a href="#players?form=${k}" ${k === current ? 'class="active" aria-current="page"' : ''}>${label}</a>`).join('')}</nav></div>
+    <p>Registrations go straight to the commissioner. Contact details are never shown on the public site.</p>
+    ${forms[current]}
   </div>`;
 }
 
 const REGISTER_DONE = {
-  player: 'Player registration received. The commissioner will review it.',
+  player: 'Free agent registration received. The commissioner will review it.',
   owner: 'Owner registration received. The commissioner will review it.',
   sponsor: 'Thanks for your interest. The commissioner will be in touch.',
 };
@@ -507,7 +647,7 @@ registration.after = el => {
     e.preventDefault();
     const kind = form.dataset.register;
     const data = formData(form);
-    if (kind === 'owner') data.roster = [0, 1, 2, 3, 4, 5, 6].map(i => data[`roster${i}`]);
+    if (kind === 'owner') data.roster = [0, 1, 2, 3, 4, 5, 6].map(i => ({ discordTag: data[`roster${i}`], positions: data[`positions${i}`] }));
     const msg = $('.msg', form);
     const button = $('button', form);
     button.disabled = true;
@@ -524,6 +664,60 @@ registration.after = el => {
 };
 
 // ---------- News ----------
+
+// ---------- League Rules ----------
+
+export function rules() {
+  const r = store.data.rules;
+  const admin = store.data.me.admin;
+  if (!r?.text) {
+    return `<div class="panel"><h2>League Rules</h2>
+      <p>The league rules will be posted here soon.</p>
+      ${admin ? '<p class="muted">Paste the rules from Discord in the <a href="#desk">Commissioner\'s Desk</a> under League Rules.</p>' : ''}
+    </div>`;
+  }
+  const { html, headings } = renderDiscord(r.text);
+  const toc = headings.filter(h => h.level <= 2);
+  const updated = r.updated_at ? new Date(r.updated_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '';
+  return `<div class="panel"><div class="page-head"><div><h2>League Rules</h2>
+      ${updated ? `<p class="muted">Last updated ${esc(updated)}</p>` : ''}</div>
+      ${admin ? '<a class="promo-link ghost" href="#desk">Edit rules</a>' : ''}</div>
+    ${toc.length >= 3 ? `<nav class="rules-toc" aria-label="Rules sections"><span class="eyebrow">JUMP TO</span>
+      <ol>${toc.map(h => `<li class="lvl-${h.level}"><a href="#${h.id}" data-scroll>${h.html.replace(/<a\b[^>]*>|<\/a>/g, '')}</a></li>`).join('')}</ol></nav>` : ''}
+    <article class="rules-body">${html}</article>
+  </div>`;
+}
+
+// ---------- Sponsors ----------
+
+// League sponsors, shown on the Sponsors page. Add an entry here to list another sponsor.
+const SPONSORS = [
+  {
+    name: 'Soul Runner',
+    role: 'PRESENTING SPONSOR',
+    logo: '/logo.png',
+    blurb: 'The brand behind the Soul Runner NBA 2K27 PC Leagues. Follow Soul Runner on X to connect with the brand and keep the conversation going beyond the court.',
+    link: { href: 'https://x.com/soulrunner', label: 'Follow @soulrunner on X' },
+  },
+];
+
+export function sponsors() {
+  return `<div class="panel"><h2>Sponsors</h2>
+    <p>The brands that make the Soul Runner NBA 2K27 PC Leagues possible.</p>
+    <div class="sponsor-list">
+      ${SPONSORS.map(sp => `<article class="soul-promo sponsor">
+        <img src="${esc(sp.logo)}" alt="${esc(sp.name)} logo" width="400" height="400">
+        <div>
+          <span class="eyebrow">${esc(sp.role)}</span>
+          <h3>${esc(sp.name)}</h3>
+          <p>${esc(sp.blurb)}</p>
+          <a class="promo-link" href="${esc(sp.link.href)}" target="_blank" rel="noopener noreferrer">${esc(sp.link.label)} ↗</a>
+        </div>
+      </article>`).join('')}
+    </div>
+    <p class="muted sponsor-cta">Interested in sponsoring? Use the Sponsorship Interest form on the <a href="#players">Registration</a> page.</p>
+  </div>`;
+}
 
 export function news() {
   const posts = store.data.news;

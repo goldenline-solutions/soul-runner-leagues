@@ -36,7 +36,7 @@ async function getSetting(db, key) {
 // ---------- public ----------
 
 export async function bootstrap(db, { admin }) {
-  const [leagues, teams, roster, weeks, series, games, players, news, allstar] = await Promise.all([
+  const [leagues, teams, roster, weeks, series, games, players, news, allstar, rules] = await Promise.all([
     db.all('SELECT * FROM leagues ORDER BY sort'),
     db.all('SELECT * FROM teams ORDER BY name'),
     db.all(`SELECT rs.team_id, rs.slot, p.id AS player_id, p.discord_tag AS tag
@@ -48,8 +48,9 @@ export async function bootstrap(db, { admin }) {
     db.all('SELECT id, discord_tag AS tag FROM players ORDER BY lower(discord_tag)'),
     db.all('SELECT * FROM news ORDER BY published_at DESC, id DESC LIMIT 50'),
     getSetting(db, 'allstar'),
+    getSetting(db, 'rules'),
   ]);
-  return { leagues, teams, roster, weeks, series, games, players, news, allstar, me: { admin } };
+  return { leagues, teams, roster, weeks, series, games, players, news, allstar, rules, me: { admin } };
 }
 
 export async function gameDetail(db, id) {
@@ -112,6 +113,7 @@ export async function register(db, body) {
     data = {
       discordTag: required(body.discordTag, 'Discord Tag'),
       steamTag: required(body.steamTag, 'Steam Tag'),
+      positions: required(body.positions, 'Position(s)', 40),
       recWinPercent: percent(body.recWinPercent, 'Rec Win %'),
       fgShootingPercent: percent(body.fgShootingPercent, 'FG Shooting %'),
       threePtShootingPercent: percent(body.threePtShootingPercent, '3-pt Shooting %'),
@@ -121,7 +123,10 @@ export async function register(db, body) {
       steamTag: required(body.steamTag, 'Steam Tag'),
       discordTag: required(body.discordTag, 'Discord Tag'),
       crewName: required(body.crewName, 'Crew Name'),
-      roster: ROSTER_SLOTS.map((slot, i) => ({ slot, discordTag: text(body.roster?.[i]) })),
+      // Players 1-7: a Discord tag and the position(s) each one plays.
+      roster: ROSTER_SLOTS.map((_, i) => ({
+        slot: i + 1, discordTag: text(body.roster?.[i]?.discordTag, 64), positions: text(body.roster?.[i]?.positions, 40),
+      })),
     };
   } else if (body.kind === 'sponsor') {
     const email = required(body.email, 'Contact E-mail');
@@ -174,13 +179,49 @@ export async function fillRostersFromGames(db) {
     FROM box_scores GROUP BY team_id, player_id ORDER BY n DESC, first, player_id`)));
 }
 
+// ---------- team logos ----------
+// The browser shrinks the image to 512 px before upload, so anything big is not a logo.
+export const LOGO_MAX_BYTES = 1_500_000;
+
+export async function saveTeamLogo(db, id, body) {
+  const team = await db.get('SELECT id FROM teams WHERE id = ?', id);
+  if (!team) throw new UserError('Team not found.', 404);
+  // No SVG: an SVG can carry script, and logos are served from the site's own origin.
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(body.image || ''));
+  if (!m) throw new UserError('Upload a PNG, JPG or WebP image.');
+  const image = Buffer.from(m[2], 'base64');
+  if (image.length > LOGO_MAX_BYTES) throw new UserError('That logo is too large (limit 1.5 MB).', 413);
+  return db.tx(async t => {
+    await t.run(`INSERT INTO team_logos (team_id, mime, image) VALUES (?, ?, ?)
+      ON CONFLICT (team_id) DO UPDATE SET mime = excluded.mime, image = excluded.image,
+        updated_at = to_char(timezone('utc', now()), 'YYYY-MM-DD HH24:MI:SS')`, id, m[1], image);
+    return t.get('UPDATE teams SET logo_version = abs(logo_version) + 1 WHERE id = ? RETURNING logo_version', id);
+  });
+}
+
+export async function deleteTeamLogo(db, id) {
+  await db.tx(async t => {
+    await t.run('DELETE FROM team_logos WHERE team_id = ?', id);
+    // Negative = no logo. The number is kept so the next upload gets a new URL, not a cached old image.
+    await t.run('UPDATE teams SET logo_version = -abs(logo_version) WHERE id = ?', id);
+  });
+}
+
+export async function readTeamLogo(db, id, versioned) {
+  const row = await db.get('SELECT mime, image FROM team_logos WHERE team_id = ?', id);
+  if (!row) throw new UserError('No logo for this team.', 404);
+  // ?v=N URLs change on every upload, so they can be cached for good.
+  return { mime: row.mime, data: Buffer.from(row.image), cache: versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=300' };
+}
+
 export async function updateTeam(db, id, body) {
   const team = await db.get('SELECT * FROM teams WHERE id = ?', id);
   if (!team) throw new UserError('Team not found.', 404);
   const fields = {
     owner_coach: text(body.owner_coach),
     stream_url: streamUrl(body.stream_url),
-    sponsors: text(body.sponsors, 500),
+    // No longer in the roster editor: keep whatever is stored unless a value is sent.
+    sponsors: body.sponsors === undefined ? team.sponsors : text(body.sponsors, 500),
     affiliated_teams: text(body.affiliated_teams),
   };
   await db.tx(async t => {
@@ -238,6 +279,18 @@ export async function saveAllstar(db, body) {
   };
   await db.run(`INSERT INTO settings (key, value) VALUES ('allstar', ?)
     ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(value));
+}
+
+// League Rules page: the text as pasted from Discord (Discord markdown), plus when it was saved.
+export const RULES_MAX = 60000;
+
+export async function saveRules(db, body) {
+  const raw = String(body.text ?? '').replace(/\r\n?/g, '\n').trim();
+  if (raw.length > RULES_MAX) throw new UserError(`The rules are too long (${raw.length} characters, limit ${RULES_MAX}).`);
+  const value = { text: raw, updated_at: new Date().toISOString() };
+  await db.run(`INSERT INTO settings (key, value) VALUES ('rules', ?)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(value));
+  return value;
 }
 
 export const EXPORT_TABLES = ['leagues', 'teams', 'players', 'roster_slots', 'weeks', 'series', 'games', 'box_scores',

@@ -3,9 +3,10 @@ import { store, esc, api, $, teamsIn, standings, seriesGames, setMsg, formData, 
 import { rosterNote } from './scorer.js';
 
 const LABELS = {
-  discordTag: 'Discord', steamTag: 'Steam', recWinPercent: 'Rec Win %', fgShootingPercent: 'FG %',
+  discordTag: 'Discord', steamTag: 'Steam', positions: 'Position(s)', recWinPercent: 'Rec Win %', fgShootingPercent: 'FG %',
   threePtShootingPercent: '3-pt %', crewName: 'Crew', type: 'Type', name: 'Name', email: 'E-mail', phone: 'Phone', description: 'Description',
 };
+const KIND_LABELS = { player: 'FREE AGENT', owner: 'OWNER', sponsor: 'SPONSOR' };
 const SEEDS = { 1: [1, 8], 2: [4, 5], 3: [2, 7], 4: [3, 6] };
 let filter = 'new';
 
@@ -30,6 +31,14 @@ export function desk() {
       <div class="reg-list">${store.data.news.map(n => `<div class="reg-card"><strong>${esc(n.title)}</strong>
         <span class="muted small"> · ${esc(n.published_at.slice(0, 10))}</span>
         <button class="btn-danger btn-small" data-del-news="${n.id}">Delete</button></div>`).join('')}</div>
+    </section>
+
+    <section class="registration-section"><h3>League Rules</h3>
+      <p class="muted">Paste the rules straight from Discord. Discord formatting carries over: # headings, **bold**, *italic*, __underline__, - bullets, 1. numbered lists and &gt; quotes. Shown on the <a href="#rules">Rules</a> page.</p>
+      <form id="rulesForm" class="stack">
+        <label>Rules text<textarea name="text" rows="18" maxlength="60000" class="rules-input" spellcheck="true">${esc(store.data.rules?.text || '')}</textarea></label>
+        <button>Save rules</button><p class="msg" role="status"></p>
+      </form>
     </section>
 
     <section class="registration-section"><h3>Rosters from box scores</h3>
@@ -115,6 +124,12 @@ desk.after = async el => {
     try {
       if (form.id === 'newsForm') await api('/api/admin/news', { method: 'POST', body: formData(form) });
       else if (form.id === 'allstarForm') await api('/api/admin/allstar', { method: 'PUT', body: formData(form) });
+      else if (form.id === 'rulesForm') {
+        await api('/api/admin/rules', { method: 'PUT', body: formData(form) });
+        await store.refresh();
+        setMsg($('#rulesForm .msg'), 'Rules saved. See them on the Rules page.', 'ok');
+        return;
+      }
       else if (form.dataset.series) await api(`/api/admin/series/${form.dataset.series}`, { method: 'PUT', body: formData(form) });
       else return;
       await store.refresh();
@@ -131,9 +146,9 @@ async function loadRegistrations(el) {
     const d = r.data;
     const fields = Object.entries(d).filter(([k]) => k !== 'roster')
       .map(([k, v]) => `<dt>${esc(LABELS[k] || k)}</dt><dd>${esc(v)}</dd>`).join('');
-    const roster = d.roster?.filter(x => x.discordTag).map(x => `${x.slot}: ${x.discordTag}`).join(' · ');
+    const roster = d.roster?.filter(x => x.discordTag).map(x => `${x.slot}: ${x.discordTag}${x.positions ? ` (${x.positions})` : ''}`).join(' · ');
     return `<article class="reg-card">
-      <span class="badge">${esc(r.kind.toUpperCase())}</span> <span class="muted small">${esc(r.created_at)} · ${esc(r.status)}</span>
+      <span class="badge">${esc(KIND_LABELS[r.kind] || r.kind.toUpperCase())}</span> <span class="muted small">${esc(r.created_at)} · ${esc(r.status)}</span>
       <dl>${fields}${roster ? `<dt>Roster</dt><dd>${esc(roster)}</dd>` : ''}</dl>
       ${r.status !== 'approved' ? `<button class="btn-small" data-reg-status="approved" data-id="${r.id}">${r.kind === 'player' ? 'Approve · add to league players' : 'Mark handled'}</button>` : ''}
       ${r.status !== 'archived' ? `<button class="btn-ghost btn-small" data-reg-status="archived" data-id="${r.id}">Archive</button>` : ''}

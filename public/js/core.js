@@ -50,6 +50,29 @@ export async function load() {
 }
 
 export const teamName = id => store.data.teamById.get(id)?.name ?? '';
+
+// Team logo, or initials in a badge when the commissioner hasn't uploaded one. size: CSS class suffix.
+export function teamLogo(t, size = 'md') {
+  if (!t) return '';
+  if (t.logo_version > 0) {
+    return `<img class="team-logo team-logo-${size}" src="/api/teams/${t.id}/logo?v=${t.logo_version}" alt="${esc(t.name)} logo" loading="lazy">`;
+  }
+  const initials = t.name.split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase();
+  return `<span class="team-logo team-logo-${size} team-logo-empty" aria-hidden="true">${esc(initials)}</span>`;
+}
+
+// Shrinks an image file to fit max x max and returns a data URL (WebP, or PNG where WebP isn't supported).
+// Keeps transparency, so cut-out mascots stay cut out.
+export async function shrinkLogo(file, max = 512) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const webp = canvas.toDataURL('image/webp', 0.9);
+  return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
+}
 export const seriesGames = id => store.data.gamesBySeries.get(id) ?? [];
 export const teamsIn = league => store.data.teams.filter(t => t.league_id === league);
 
@@ -87,11 +110,16 @@ export function standings(league) {
       win[0].sw++; win[1].sl++;
     }
   }
-  const pct = r => (r.gp ? r.w / r.gp : 0);
-  return [...rows.values()].sort((a, b) => pct(b) - pct(a) || b.diff - a.diff || a.team.name.localeCompare(b.team.name));
+  // Ranked by series (matchup) win percentage, then game win percentage, then point differential.
+  const gamePct = r => (r.gp ? r.w / r.gp : 0);
+  return [...rows.values()].sort((a, b) => seriesPct(b) - seriesPct(a) || gamePct(b) - gamePct(a)
+    || b.diff - a.diff || a.team.name.localeCompare(b.team.name));
 }
 
-export const winPct = r => (r.gp ? (r.w / r.gp).toFixed(3).replace(/^0/, '') : '.000');
+const seriesPct = r => (r.sw + r.sl ? r.sw / (r.sw + r.sl) : 0);
+
+// Series (matchup) win percentage, as shown in the standings: .667, 1.000.
+export const winPct = r => seriesPct(r).toFixed(3).replace(/^0/, '');
 export const signed = n => (n > 0 ? `+${n}` : String(n));
 
 const todayIso = () => new Date().toLocaleDateString('en-CA');

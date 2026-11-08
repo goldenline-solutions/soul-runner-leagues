@@ -158,7 +158,20 @@ CREATE TABLE screenshots (
 );
 CREATE INDEX screenshots_game ON screenshots(game_id);
 
-INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql');
+-- ===== 0003_team_logos.sql =====
+-- Team logos / mascots, uploaded by the commissioner. One image per team, stored in the database
+-- (hosts like Vercel have no persistent disk). teams.logo_version changes on every upload so
+-- browsers can cache /api/teams/:id/logo?v=N forever. Positive = has a logo; removing one makes it
+-- negative, so a later upload still gets a URL no browser has cached.
+CREATE TABLE team_logos (
+  team_id INTEGER PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL,
+  image BYTEA NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT to_char(timezone('utc', now()), 'YYYY-MM-DD HH24:MI:SS')
+);
+ALTER TABLE teams ADD COLUMN logo_version INTEGER NOT NULL DEFAULT 0;
+
+INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql');
 
 -- ===== Season 1 data =====
 INSERT INTO leagues (id, name, season_name, blurb, sort) VALUES

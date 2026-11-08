@@ -234,6 +234,41 @@ textarea { resize: vertical; width: 100%; }
   background: rgba(0, 207, 255, .07); border: 1px solid rgba(0, 207, 255, .22); color: var(--ice);
 }
 
+/* ---------- NBA 2K27 banner (links to the official buy page) ---------- */
+.game-banner {
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; gap: 14px 24px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 14px 20px 14px 26px; border-radius: var(--r);
+  border: 1px solid var(--line-2); color: var(--text); text-decoration: none;
+  background: linear-gradient(100deg, #0b0f1a 0%, #111a2b 60%, #04213a 100%);
+  transition: border-color .2s var(--ease), background .2s var(--ease);
+}
+.game-banner::before { /* red / blue edge stripe */
+  content: ''; position: absolute; inset: 0 auto 0 0; width: 6px;
+  background: linear-gradient(180deg, #e0263a 0 50%, #1d5bd8 50% 100%);
+}
+.game-mark {
+  font-family: var(--display); font-style: italic; font-weight: 800; font-size: 34px; line-height: 1;
+  letter-spacing: .01em; color: #fff; white-space: nowrap;
+}
+.game-mark b { color: var(--cyan); font-weight: 800; }
+.game-copy { flex: 1 1 260px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.game-copy strong { font-weight: 700; }
+.game-copy span { color: var(--muted); font-size: 14px; }
+.game-cta {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 999px;
+  background: var(--cyan); color: var(--ink); font-weight: 800; font-size: 14px; letter-spacing: .02em; white-space: nowrap;
+  transition: transform .2s var(--ease), background .2s var(--ease);
+}
+.game-banner:hover { border-color: var(--ice); background: linear-gradient(100deg, #0e1422 0%, #16223a 60%, #06294a 100%); color: var(--text); }
+.game-banner:hover .game-cta { background: #5ce3ff; transform: translateY(-1px); }
+.game-banner:focus-visible { outline: 2px solid var(--ice); outline-offset: 3px; }
+@media (max-width: 720px) {
+  .game-banner { padding: 14px 16px 16px 22px; }
+  .game-mark { font-size: 28px; }
+  .game-cta { width: 100%; justify-content: center; }
+}
+
 /* ---------- hero ---------- */
 .hero {
   position: relative; isolation: isolate; overflow: hidden;
@@ -311,6 +346,9 @@ textarea { resize: vertical; width: 100%; }
 }
 .soul-promo img { width: 132px; height: auto; flex-shrink: 0; border-radius: 22px; box-shadow: 0 20px 50px -20px rgba(0, 207, 255, .6); }
 .soul-promo h3 { font-size: 34px; margin: 8px 0 10px; }
+.sponsor-list { display: grid; gap: 16px; margin: 22px 0; }
+.sponsor-list .soul-promo { margin: 0; }
+.sponsor-cta { margin: 0; }
 .soul-promo p { margin: 0 0 20px; max-width: 640px; }
 
 /* ---------- schedule ---------- */
@@ -372,11 +410,69 @@ textarea { resize: vertical; width: 100%; }
   background: rgba(0, 207, 255, .1); color: var(--ice); font-family: var(--display); font-weight: 700; font-size: 14px; letter-spacing: .04em;
 }
 .tba { color: #58788c; font-size: 13px; }
+
+/* team logos (uploaded by the commissioner; initials badge until then) */
+.team-logo { flex: none; display: block; object-fit: contain; border-radius: 14px; }
+.team-logo-empty {
+  display: grid; place-items: center; font-family: var(--display); font-weight: 800; font-style: italic; color: var(--ice);
+  background: linear-gradient(150deg, rgba(0, 207, 255, .16), rgba(0, 157, 255, .04)); border: 1px dashed rgba(112, 234, 255, .3);
+}
+.team-logo-sm { width: 40px; height: 40px; border-radius: 10px; }
+.team-logo-sm.team-logo-empty { font-size: 15px; }
+.team-logo-lg { width: 112px; height: 112px; border-radius: 22px; }
+.team-logo-lg.team-logo-empty { font-size: 38px; }
+img.team-logo-lg { filter: drop-shadow(0 18px 30px rgba(0, 157, 255, .35)); }
+.team-head { align-items: center; }
+.team-head h3 { flex: 1; min-width: 0; }
+.team-head-logo { display: block; }
+.team-title { display: flex; align-items: center; gap: 20px; min-width: 0; }
+.team-title h2 { overflow-wrap: anywhere; }
+.team-logo-btn { all: unset; display: block; position: relative; cursor: pointer; border-radius: 22px; }
+.logo-btn-label {
+  position: absolute; inset: auto 0 -8px; margin: auto; width: max-content; padding: 3px 10px; border-radius: 999px;
+  background: var(--cyan); color: var(--ink); font-size: 11px; font-weight: 800; opacity: 0; transition: opacity .15s;
+}
+.team-logo-btn:hover .logo-btn-label, .team-logo-btn:focus-visible .logo-btn-label { opacity: 1; }
+.team-logo-btn:focus-visible { outline: 2px solid var(--ice); outline-offset: 4px; }
+.logo-editor { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.logo-editor p { margin: 4px 0 10px; }
+.file-btn { position: relative; cursor: pointer; margin-right: 6px; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.file-btn:focus-within { outline: 2px solid #fff; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .team-logo-lg { width: 76px; height: 76px; border-radius: 16px; }
+  .team-logo-lg.team-logo-empty { font-size: 26px; }
+  .team-title { gap: 14px; }
+  .logo-editor { flex-direction: column; }
+}
 .team-details { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 .team-details > div { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 12px; align-items: baseline; }
 .team-details dt { font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .team-details dd { margin: 0; font-size: 13px; color: var(--text-2); text-align: right; overflow-wrap: anywhere; }
 .team-details a { color: var(--ice); }
+.team h3 a { color: inherit; text-decoration: none; }
+.team h3 a:hover { color: var(--ice); }
+.box-head .team-name a { color: inherit; text-decoration: none; }
+.box-head .team-name a:hover { color: var(--ice); }
+
+/* team page (#team/ID) */
+.team-page { animation: team-in .35s var(--ease); }
+@keyframes team-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .team-page { animation: none; } }
+.team-record-strip { margin: 8px 0 24px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+@media (max-width: 720px) {
+  .team-record-strip { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .team-record-strip .stat { padding: 14px 16px; }
+  .team-record-strip .stat strong { font-size: 30px; }
+}
+.team-page-grid { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.team-section-title { font-size: 24px; font-weight: 800; margin: 0 0 12px; }
+.team-matchups, .team-player-stats { min-width: 0; }
+.team-matchups { margin-top: 32px; }
+.team-matchups td { white-space: nowrap; }
+.result.win { color: var(--good); font-weight: 700; }
+.result.loss { color: var(--bad); font-weight: 700; }
+@media (max-width: 900px) { .team-page-grid { grid-template-columns: 1fr; } }
 .roster-actions { margin-top: 20px; }
 .roster-actions p { font-size: 13px; }
 
@@ -452,6 +548,15 @@ caption { text-align: left; caption-side: top; padding: 0 0 10px; font-family: v
 .registration-grid input, .registration-grid textarea { width: 100%; }
 .roster-fields, .wide-field { grid-column: 1 / -1; }
 .roster-fields { border: 1px solid var(--line-2); border-radius: 14px; padding: 18px; margin: 0; }
+.owner-roster { display: grid; gap: 12px; }
+.owner-roster-row { display: grid; grid-template-columns: 30px minmax(0, 1.2fr) minmax(0, 1fr); gap: 8px 12px; align-items: end; }
+.owner-roster-row .pos { align-self: end; margin-bottom: 10px; justify-content: center; }
+.owner-roster-row input { width: 100%; }
+@media (max-width: 720px) {
+  .owner-roster-row { grid-template-columns: 30px minmax(0, 1fr); padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .owner-roster-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .owner-roster-row .pos { grid-row: span 2; align-self: start; margin: 26px 0 0; }
+}
 .roster-fields legend { color: var(--ice); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; padding: 0 6px; }
 .registration-form > button { margin-top: 20px; }
 .registration-form [role=status] { min-height: 1.2em; margin-top: 10px; }
@@ -465,6 +570,33 @@ caption { text-align: left; caption-side: top; padding: 0 0 10px; font-family: v
 .reg-card .btn-small { margin-left: 10px; }
 
 /* ---------- news ---------- */
+/* League Rules page (text pasted from Discord) */
+.rules-toc { margin: 8px 0 28px; padding: 18px 22px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--surface); max-width: 860px; }
+.rules-toc ol { list-style: none; margin: 10px 0 0; padding: 0; columns: 2 260px; column-gap: 28px; }
+.rules-toc li { break-inside: avoid; padding: 3px 0; }
+.rules-toc li.lvl-2 { padding-left: 14px; font-size: 14px; }
+.rules-toc a { color: var(--text); text-decoration: none; }
+.rules-toc a:hover { color: var(--ice); }
+.rules-body { max-width: 860px; font-size: 16px; line-height: 1.75; overflow-wrap: anywhere; }
+.rules-body h3 { font-size: clamp(28px, 3.4vw, 38px); font-weight: 800; margin: 40px 0 12px; scroll-margin-top: 140px; }
+.rules-body h4 { font-size: 24px; font-weight: 800; margin: 28px 0 10px; color: var(--ice); scroll-margin-top: 140px; }
+.rules-body h5 { font-family: var(--body); text-transform: none; font-size: 17px; font-weight: 700; margin: 22px 0 8px; scroll-margin-top: 140px; }
+.rules-body > :first-child { margin-top: 0; }
+.rules-body p { margin: 0 0 14px; }
+.rules-body ul, .rules-body ol { margin: 0 0 16px; padding-left: 24px; }
+.rules-body li { margin: 4px 0; }
+.rules-body li > ul { margin: 4px 0 0; }
+.rules-body li::marker { color: var(--ice); }
+.rules-body blockquote { margin: 0 0 16px; padding: 10px 16px; border-left: 4px solid var(--cyan); background: rgba(0, 207, 255, .06); border-radius: 0 10px 10px 0; }
+.rules-body .subtext { font-size: 13px; color: var(--muted); }
+.rules-body code { font-size: .9em; padding: 1px 6px; border-radius: 6px; background: rgba(112, 234, 255, .1); }
+.rules-body pre { margin: 0 0 16px; padding: 14px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); overflow-x: auto; white-space: pre-wrap; }
+.rules-body pre code { padding: 0; background: none; }
+.rules-body a { color: var(--ice); }
+.rules-body .spoiler { background: var(--text-2, #c9d8e0); color: transparent; border-radius: 4px; cursor: pointer; transition: color .2s, background .2s; }
+.rules-body .spoiler:hover, .rules-body .spoiler:focus { background: rgba(112, 234, 255, .12); color: inherit; }
+.rules-input { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 13.5px; line-height: 1.5; }
+
 .news-post { padding: 26px 28px; margin-top: 16px; max-width: 860px; }
 .news-post time { color: var(--ice); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
 .news-post h3 { margin: 10px 0 12px; font-size: 32px; font-weight: 800; }
@@ -521,6 +653,23 @@ dialog form > button { margin: 14px 8px 0 0; }
 
 /* ---------- footer ---------- */
 .site-footer { border-top: 1px solid var(--line); padding: 36px 22px 44px; text-align: center; color: var(--muted); font-size: 12px; letter-spacing: .12em; }
+.footer-nav {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 4px;
+  max-width: 1100px; margin: 0 auto 28px; letter-spacing: 0;
+}
+.footer-nav a {
+  padding: 8px 12px; border-radius: 999px; color: var(--text-2); font-size: 14px; font-weight: 600; text-decoration: none;
+  transition: color .15s, background .15s;
+}
+.footer-nav a:hover { color: #fff; background: rgba(112, 234, 255, .08); }
+.footer-nav a.active { color: var(--ink); background: var(--cyan); }
+.footer-nav a.staff-foot { color: var(--ice); }
+.footer-nav a.staff-foot.active { color: var(--ink); }
+.footer-nav a:focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+@media (max-width: 720px) {
+  .footer-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; text-align: left; }
+  .footer-nav a { padding: 10px 12px; border-radius: 10px; }
+}
 .footer-brand { display: inline-flex; align-items: center; gap: 10px; }
 .footer-brand img { border-radius: 8px; opacity: .85; }
 #footerAuth { margin-top: 12px; letter-spacing: 0; font-size: 13px; }

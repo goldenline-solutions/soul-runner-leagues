@@ -1,5 +1,5 @@
 // Router, navigation and the roster editor dialog.
-import { store, load, esc, api, $, SLOTS, setMsg, formData, currentWeek, pad2 } from './core.js';
+import { store, load, esc, api, $, SLOTS, setMsg, formData, currentWeek, pad2, teamLogo, shrinkLogo } from './core.js';
 import * as v from './views.js';
 import { scorer } from './scorer.js';
 import { desk } from './desk.js';
@@ -21,12 +21,14 @@ const PAGES = [
   ['allstar', 'All-Star Game', v.allstar],
   ['playoffs', 'Playoffs', v.playoffs],
   ['news', "Tyreek's Desk: News and Notes", v.news, { nav: "Tyreek's Desk" }],
+  ['rules', 'League Rules', v.rules, { nav: 'Rules' }],
+  ['sponsors', 'Sponsors', v.sponsors],
   ['players', 'Registration', v.registration],
   ['game', 'Upload Results', scorer, { staff: true }],
   ['desk', "Commissioner's Desk", desk, { admin: true }],
 ];
-const HIDDEN = { box: v.box, player: v.player };
-const HIDDEN_UNDER = { box: 'schedule', player: 'stats' };
+const HIDDEN = { box: v.box, player: v.player, team: v.team };
+const HIDDEN_UNDER = { box: 'schedule', player: 'stats', team: 'premier' };
 
 function parseHash() {
   const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
@@ -52,6 +54,9 @@ function renderNav(active) {
   // Commissioner links sit in the top bar on wide screens and at the end of the nav row on phones.
   $('#nav').innerHTML = PAGES.filter(p => !p[3]?.under && !isStaff(p)).map(p => link(p)).join('')
     + (admin ? PAGES.filter(isStaff).map(p => link(p, 'staff-nav')).join('') : '');
+  // Same links at the bottom of every page, so nobody has to scroll back up to change pages.
+  $('#footerNav').innerHTML = PAGES.filter(p => !p[3]?.under && (!isStaff(p) || admin))
+    .map(p => link(p, isStaff(p) ? 'staff-foot' : '')).join('');
   const cw = currentWeek('premier');
   $('#headerMeta').innerHTML = (cw
     ? `<a class="live-chip${cw.live ? ' live' : ''}" href="#schedule"><span class="dot" aria-hidden="true"></span><span class="live-label">${cw.live ? 'This weekend' : 'Up next'} · </span>Weekend ${pad2(cw.week.number)}<span class="live-date"> · ${esc(cw.week.date_label)}</span></a>`
@@ -78,6 +83,8 @@ function render() {
   $('#view').replaceChildren(container);
   document.title = page && name !== 'overview'
     ? `${page[1]} · Soul Runner NBA 2k27 PC Leagues` : 'Soul Runner Presents: NBA 2k27 PC Leagues';
+  const t = name === 'team' && store.data.teamById.get(Number(id));
+  if (t) document.title = `${t.name} · Soul Runner NBA 2k27 PC Leagues`;
   view.after?.(container, id, query)?.catch?.(showError(container));
 }
 
@@ -96,11 +103,20 @@ function openRosterEditor(teamId) {
     `<label>${label}<input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`;
   dialog.innerHTML = `
     <div class="dialog-heading"><h2 id="dialogTitle">${esc(t.name)} · Update Roster</h2><button type="button" class="btn-ghost" data-close>Close</button></div>
+    <section class="logo-editor" aria-label="Team logo">
+      <div id="logoPreview">${teamLogo(t, 'lg')}</div>
+      <div>
+        <strong>Team logo / mascot</strong>
+        <p class="muted small">PNG, JPG or WebP. Square works best; it's resized to 512 px and transparent backgrounds are kept. Saves as soon as you pick it.</p>
+        <label class="promo-link btn-small file-btn">${t.logo_version > 0 ? 'Replace logo' : 'Upload logo'}<input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp"></label>
+        ${t.logo_version > 0 ? '<button type="button" class="btn-ghost btn-small" id="logoRemove">Remove</button>' : ''}
+        <p class="msg" id="logoMsg" role="status"></p>
+      </div>
+    </section>
     <form id="rosterForm">
       <div class="registration-grid">
         ${input('owner_coach', 'Owner/Coach', t.owner_coach)}
         ${input('stream_url', 'Twitch.tv Stream', t.stream_url, 'url', 'placeholder="https://twitch.tv/…"')}
-        ${input('sponsors', 'Sponsors', t.sponsors)}
         ${input('affiliated_teams', 'Affiliated Team(s)', t.affiliated_teams)}
         ${SLOTS.map(([key, label]) => input(`slot_${key}`, label, roster[key]?.tag || '', 'text', 'placeholder="Discord Tag" list="playerTags"')).join('')}
       </div>
@@ -110,6 +126,34 @@ function openRosterEditor(teamId) {
       <p class="msg" role="status"></p>
     </form>`;
   dialog.showModal();
+  const afterLogo = async text => {
+    await refresh(); // re-renders the page behind the dialog with the new logo
+    openRosterEditor(t.id);
+    setMsg($('#logoMsg'), text, 'ok');
+  };
+  $('#logoFile').onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const msg = $('#logoMsg');
+    setMsg(msg, 'Uploading…');
+    try {
+      const image = await shrinkLogo(file);
+      await api(`/api/admin/teams/${t.id}/logo`, { method: 'PUT', body: { image } });
+      await afterLogo('Logo saved.');
+    } catch (err) {
+      setMsg(msg, err.message || 'That file could not be read as an image.', 'error');
+    }
+  };
+  if ($('#logoRemove')) {
+    $('#logoRemove').onclick = async () => {
+      try {
+        await api(`/api/admin/teams/${t.id}/logo`, { method: 'DELETE' });
+        await afterLogo('Logo removed.');
+      } catch (err) {
+        setMsg($('#logoMsg'), err.message, 'error');
+      }
+    };
+  }
   $('#rosterForm').onsubmit = async e => {
     e.preventDefault();
     const data = formData(e.target);

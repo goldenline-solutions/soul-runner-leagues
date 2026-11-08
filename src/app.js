@@ -64,6 +64,9 @@ export function createApp({ db, env = process.env }) {
     ['GET', /^\/api\/admin\/registrations$/, () => api.listRegistrations(db), { admin: true }],
     ['PATCH', /^\/api\/admin\/registrations\/(\d+)$/, ctx => api.setRegistrationStatus(db, id(ctx.params[0]), ctx.body.status), { admin: true }],
     ['PUT', /^\/api\/admin\/teams\/(\d+)$/, ctx => api.updateTeam(db, id(ctx.params[0]), ctx.body), { admin: true }],
+    ['PUT', /^\/api\/admin\/teams\/(\d+)\/logo$/, ctx => api.saveTeamLogo(db, id(ctx.params[0]), ctx.body), { admin: true, maxBody: 2.5e6 }],
+    ['DELETE', /^\/api\/admin\/teams\/(\d+)\/logo$/, ctx => api.deleteTeamLogo(db, id(ctx.params[0])), { admin: true }],
+    ['GET', /^\/api\/teams\/(\d+)\/logo$/, ctx => api.readTeamLogo(db, id(ctx.params[0]), ctx.query.has('v')), { raw: true }],
     ['PUT', /^\/api\/admin\/series\/(\d+)$/, ctx => api.assignSeries(db, id(ctx.params[0]), ctx.body), { admin: true }],
     ['POST', /^\/api\/admin\/games$/, ctx => api.recordGame(db, ctx.body), { admin: true }],
     ['PUT', /^\/api\/admin\/games\/(\d+)$/, ctx => api.recordGame(db, ctx.body, id(ctx.params[0])), { admin: true }],
@@ -73,6 +76,7 @@ export function createApp({ db, env = process.env }) {
     ['PUT', /^\/api\/admin\/news\/(\d+)$/, ctx => api.postNews(db, ctx.body, id(ctx.params[0])), { admin: true }],
     ['DELETE', /^\/api\/admin\/news\/(\d+)$/, ctx => api.deleteNews(db, id(ctx.params[0])), { admin: true }],
     ['PUT', /^\/api\/admin\/allstar$/, ctx => api.saveAllstar(db, ctx.body), { admin: true }],
+    ['PUT', /^\/api\/admin\/rules$/, ctx => api.saveRules(db, ctx.body), { admin: true }],
     ['GET', /^\/api\/admin\/export$/, () => api.exportAll(db), { admin: true }],
     ['POST', /^\/api\/admin\/ingest$/, ctx => ingestScreenshot(db, ingest, ctx.body), { admin: true, maxBody: 15e6 }],
     ['GET', /^\/api\/screenshots\/(\d+)$/, ctx => readScreenshot(db, id(ctx.params[0]), ctx.admin), { raw: true }],
@@ -127,7 +131,7 @@ export function createApp({ db, env = process.env }) {
     const result = await handler(ctx);
     if (cookiesOut.length) res.setHeader('Set-Cookie', cookiesOut);
     if (options.raw) {
-      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': result.mime, 'Cache-Control': 'private, max-age=3600' });
+      res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': result.mime, 'Cache-Control': result.cache || 'private, max-age=3600' });
       return res.end(result.data);
     }
     sendJson(res, 200, result ?? { ok: true });

@@ -38,9 +38,15 @@ Log in from the footer link ("Commissioner login") or the Upload Results tab.
   who isn't on a roster yet goes into the first empty slot (PG → 7th Man) of the team they played
   for; nobody already on a roster is moved or replaced.
 - **Team cards** (Premier/Affiliate Teams → pick a team → Update Roster): owner, stream link,
-  sponsors, affiliates and the 7 roster slots.
+  affiliates and the 7 roster slots. The same dialog uploads the **team logo / mascot** (PNG, JPG or
+  WebP, shrunk to 512 px in the browser, stored in the `team_logos` table). It shows on the team page
+  and team cards; teams without one get an initials badge. Commissioners can also click the logo on a
+  team page to open the dialog.
+- **Sponsors page**: the list lives in `SPONSORS` at the top of the Sponsors section in
+  `public/js/views.js`. Add an entry (name, role, logo in `public/`, blurb, link) to list a sponsor.
 - **Commissioner's Desk**: the registrations inbox (approving a player adds them to the league),
-  posts to Tyreek's Desk, **Fill empty roster slots** (the roster autofill, run over every saved
+  posts to Tyreek's Desk, **League Rules** (paste the rules from Discord; Discord formatting is kept
+  and shown on the Rules page), **Fill empty roster slots** (the roster autofill, run over every saved
   game), playoff matchups ("Fill quarterfinals from standings"), All-Star details, and
   **Download data backup**.
 
