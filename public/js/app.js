@@ -107,7 +107,7 @@ function openRosterEditor(teamId) {
       <div id="logoPreview">${teamLogo(t, 'lg')}</div>
       <div>
         <strong>Team logo / mascot</strong>
-        <p class="muted small">PNG, JPG or WebP. Square works best; it's resized to 512 px and transparent backgrounds are kept. Saves as soon as you pick it.</p>
+        <p class="muted small">PNG, JPG or WebP. It fills the team page banner, so a wide or busy image works well; the middle shows best. Resized to 1200 px. Saves as soon as you pick it.</p>
         <label class="promo-link btn-small file-btn">${t.logo_version > 0 ? 'Replace logo' : 'Upload logo'}<input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp"></label>
         ${t.logo_version > 0 ? '<button type="button" class="btn-ghost btn-small" id="logoRemove">Remove</button>' : ''}
         <p class="msg" id="logoMsg" role="status"></p>

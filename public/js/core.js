@@ -64,16 +64,20 @@ export function teamLogo(t, size = 'md') {
 }
 
 // Shrinks an image file to fit max x max and returns a data URL (WebP, or PNG where WebP isn't supported).
-// Keeps transparency, so cut-out mascots stay cut out.
-export async function shrinkLogo(file, max = 512) {
+// Keeps transparency, so cut-out mascots stay cut out. 1200 px keeps the full-width team banner sharp;
+// if the result is over the server's 1.5 MB limit (big PNGs), it steps down in size.
+export async function shrinkLogo(file, max = 1200) {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  const webp = canvas.toDataURL('image/webp', 0.9);
-  return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
+  for (let size = max; ; size = Math.round(size * 0.75)) {
+    const scale = Math.min(1, size / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const webp = canvas.toDataURL('image/webp', 0.9);
+    const url = webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
+    if (url.length * 0.75 < 1_400_000 || size < 300) return url;
+  }
 }
 export const seriesGames = id => store.data.gamesBySeries.get(id) ?? [];
 export const teamsIn = league => store.data.teams.filter(t => t.league_id === league);

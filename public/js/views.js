@@ -154,9 +154,9 @@ export function team(id) {
     .sort((a, b) => (STAGE_ORDER[a.stage] ?? 9) - (STAGE_ORDER[b.stage] ?? 9)
       || (d.weekById.get(a.week_id)?.number ?? 0) - (d.weekById.get(b.week_id)?.number ?? 0) || a.id - b.id);
   const logo = logoUrl(t);
-  // Banner: a blurred wash of the logo behind the crisp logo, fading out on a curve into the page.
+  // Banner: the logo stretched edge to edge, fading out on a curve into the page.
   const art = logo
-    ? `<img class="banner-wash" src="${logo}" alt=""><img class="banner-logo" src="${logo}" alt="">`
+    ? `<img class="banner-img" src="${logo}" alt="">`
     : `<span class="banner-initials">${esc(teamInitials(t))}</span>`;
   return `<div class="panel team-page">
     <header class="team-hero${logo ? ' has-logo' : ''}">
