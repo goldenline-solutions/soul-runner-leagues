@@ -51,14 +51,16 @@ export async function load() {
 
 export const teamName = id => store.data.teamById.get(id)?.name ?? '';
 
+export const teamInitials = t => t.name.split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase();
+export const logoUrl = t => (t.logo_version > 0 ? `/api/teams/${t.id}/logo?v=${t.logo_version}` : '');
+
 // Team logo, or initials in a badge when the commissioner hasn't uploaded one. size: CSS class suffix.
 export function teamLogo(t, size = 'md') {
   if (!t) return '';
   if (t.logo_version > 0) {
-    return `<img class="team-logo team-logo-${size}" src="/api/teams/${t.id}/logo?v=${t.logo_version}" alt="${esc(t.name)} logo" loading="lazy">`;
+    return `<img class="team-logo team-logo-${size}" src="${logoUrl(t)}" alt="${esc(t.name)} logo" loading="lazy">`;
   }
-  const initials = t.name.split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase();
-  return `<span class="team-logo team-logo-${size} team-logo-empty" aria-hidden="true">${esc(initials)}</span>`;
+  return `<span class="team-logo team-logo-${size} team-logo-empty" aria-hidden="true">${esc(teamInitials(t))}</span>`;
 }
 
 // Shrinks an image file to fit max x max and returns a data URL (WebP, or PNG where WebP isn't supported).

@@ -39,9 +39,10 @@ Log in from the footer link ("Commissioner login") or the Upload Results tab.
   for; nobody already on a roster is moved or replaced.
 - **Team cards** (Premier/Affiliate Teams → pick a team → Update Roster): owner, stream link,
   affiliates and the 7 roster slots. The same dialog uploads the **team logo / mascot** (PNG, JPG or
-  WebP, shrunk to 512 px in the browser, stored in the `team_logos` table). It shows on the team page
-  and team cards; teams without one get an initials badge. Commissioners can also click the logo on a
-  team page to open the dialog.
+  WebP, shrunk to 512 px in the browser, stored in the `team_logos` table). It shows on team cards
+  and as the team page banner (a blurred wash plus the logo, fading out on a curve as the page scrolls
+  over it; the scroll effect is off for visitors who turn on "reduce motion"). Teams without one get
+  initials. Commissioners can also use the banner's "Change logo" button to open the dialog.
 - **Sponsors page**: the list lives in `SPONSORS` at the top of the Sponsors section in
   `public/js/views.js`. Add an entry (name, role, logo in `public/`, blurb, link) to list a sponsor.
 - **Commissioner's Desk**: the registrations inbox (approving a player adds them to the league),

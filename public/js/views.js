@@ -2,6 +2,7 @@
 import {
   store, esc, api, $, $$, SLOTS, STAT_KEYS, STAT_LABELS, teamName, seriesGames, seriesRecord, standings, teamsIn,
   winPct, signed, currentWeek, pad2, ratio, setMsg, formData, gameWinner, teamLogo,
+  teamInitials, logoUrl,
 } from './core.js';
 import { renderDiscord } from './discord-md.js';
 
@@ -152,14 +153,21 @@ export function team(id) {
     .filter(s => s.home_team_id === t.id || s.away_team_id === t.id)
     .sort((a, b) => (STAGE_ORDER[a.stage] ?? 9) - (STAGE_ORDER[b.stage] ?? 9)
       || (d.weekById.get(a.week_id)?.number ?? 0) - (d.weekById.get(b.week_id)?.number ?? 0) || a.id - b.id);
+  const logo = logoUrl(t);
+  // Banner: a blurred wash of the logo behind the crisp logo, fading out on a curve into the page.
+  const art = logo
+    ? `<img class="banner-wash" src="${logo}" alt=""><img class="banner-logo" src="${logo}" alt="">`
+    : `<span class="banner-initials">${esc(teamInitials(t))}</span>`;
   return `<div class="panel team-page">
-    <div class="page-head"><div class="team-title">
-      ${d.me.admin
-        ? `<button type="button" class="team-logo-btn" data-edit-team="${t.id}" title="${t.logo_version > 0 ? 'Change' : 'Upload'} the team logo">${teamLogo(t, 'lg')}<span class="logo-btn-label">${t.logo_version > 0 ? 'Change logo' : 'Add logo'}</span></button>`
-        : teamLogo(t, 'lg')}
-      <div><span class="eyebrow">${esc(league.name.toUpperCase())}</span>
-      <h2>${esc(t.name)}</h2></div>
-    </div><a class="promo-link ghost" href="#${teamsRoute}">All ${esc(league.name.replace(/ League$/, ''))} teams</a></div>
+    <header class="team-hero${logo ? ' has-logo' : ''}">
+      <div class="team-hero-art" aria-hidden="true">${art}</div>
+      ${d.me.admin ? `<button type="button" class="btn-ghost btn-small banner-edit" data-edit-team="${t.id}">${logo ? 'Change logo' : 'Add logo'}</button>` : ''}
+      <div class="page-head team-hero-head">
+        <div><span class="eyebrow">${esc(league.name.toUpperCase())}</span>
+        <h2>${esc(t.name)}</h2></div>
+        <a class="promo-link ghost" href="#${teamsRoute}">All ${esc(league.name.replace(/ League$/, ''))} teams</a>
+      </div>
+    </header>
     <div class="stats team-record-strip">
       <div class="stat"><strong>${rec?.gp ? `#${rank + 1}` : '—'}</strong><span>IN THE STANDINGS OF ${table.length}</span></div>
       <div class="stat"><strong>${rec.sw}–${rec.sl}</strong><span>MATCHUPS WON–LOST</span></div>
@@ -207,9 +215,31 @@ function teamMatchupRow(s, teamId) {
     <td>${result}</td><td>${games || '—'}</td></tr>`;
 }
 
+// As the page scrolls, the banner art drifts down slower than the page and fades, so the page
+// slides up over it. Sets --hero-p (0 at the top, 1 once the banner has scrolled away).
+let heroScroll = null;
+function watchHero(hero) {
+  if (heroScroll) removeEventListener('scroll', heroScroll);
+  heroScroll = null;
+  if (!hero || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let queued = false;
+  const update = () => {
+    queued = false;
+    if (!hero.isConnected) return watchHero(null); // left the team page
+    const p = Math.min(1, Math.max(0, scrollY / hero.offsetHeight));
+    hero.style.setProperty('--hero-p', p.toFixed(3));
+  };
+  heroScroll = () => {
+    if (!queued) { queued = true; requestAnimationFrame(update); }
+  };
+  addEventListener('scroll', heroScroll, { passive: true });
+  update();
+}
+
 team.after = async (el, id) => {
   const t = store.data.teamById.get(Number(id));
   if (!t) return;
+  watchHero($('.team-hero', el));
   const rows = (await api(`/api/stats?league=${t.league_id}&phase=all`))
     .filter(r => r.team_id === t.id)
     .sort((a, b) => b.pts / b.gp - a.pts / a.gp || a.tag.localeCompare(b.tag));
