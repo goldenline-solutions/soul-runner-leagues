@@ -143,7 +143,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
       guild, user: { id: '999', username: 'commish' }, memberPermissions: { has: () => admin },
       isAutocomplete: () => false,
       options: {
-        getSubcommand: () => sub, getString: k => options[k] ?? null, getUser: () => options.user,
+        getSubcommand: () => sub, getString: k => options[k] ?? null, getUser: () => options.user, getMember: () => null,
         getRole: () => ({ id: options.role }),
       },
       deferReply: async function defer() { this.deferred = true; },
@@ -184,4 +184,16 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
   assert.deepEqual(calls.splice(0), ['+role-a', '-role-b']);
   assert.deepEqual([...held[111]].sort(), ['role-a', 'stale-role']);
   assert.match(await run('sync'), /Roles fixed for 0/);
+
+  // The free agent role given by hand: taken off a rostered player, but a player with no team
+  // who holds it joins the pool and keeps it.
+  held[111].add('fa-role');
+  await run('sync');
+  assert.deepEqual(calls.splice(0), ['-fa-role']);
+  await run('release', { user });
+  await db.run('UPDATE players SET free_agent = false');
+  calls.splice(0);
+  assert.match(await run('sync'), /Roles fixed for 0\. Added 1 to the free agent pool/);
+  assert.deepEqual(calls, []);
+  assert.deepEqual((await roster.freeAgents(db)).map(p => p.tag), ['ann']);
 });

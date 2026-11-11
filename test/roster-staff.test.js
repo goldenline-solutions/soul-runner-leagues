@@ -23,7 +23,7 @@ test('a captain signs free agents to their own team only', async () => {
   await roster.setStaff(db, { teamId: a.id, member: cap, role: 'captain' });
 
   // Not in the pool: commissioner only. Nothing is left behind by the refusal.
-  await assert.rejects(roster.sign(db, { teamId: a.id, member: ann, actor: asCap }), /not in the free agent pool/);
+  await assert.rejects(roster.sign(db, { teamId: a.id, member: ann, actor: asCap }), /not a free agent/);
   assert.equal((await db.get("SELECT COUNT(*)::int AS n FROM players WHERE discord_id = '111'")).n, 0);
 
   await roster.addFreeAgent(db, { member: ann });
@@ -83,7 +83,10 @@ test('/roster in Discord: commissioner role, captain limits, staff roles', async
       guild, user: { id: as.id, username: as.name }, memberPermissions: { has: () => false },
       member: { roles: { cache: new Set(as.roles ?? []) } },
       isAutocomplete: () => false,
-      options: { getSubcommand: () => sub, getString: k => options[k] ?? null, getUser: () => options.user },
+      options: {
+        getSubcommand: () => sub, getString: k => options[k] ?? null, getUser: () => options.user,
+        getMember: () => ({ roles: { cache: new Set(options.holds ?? []) } }), // the roles the target member holds
+      },
       reply: async p => { said.push(p.content); },
     }, ctx);
     return said.join('\n');
@@ -99,7 +102,10 @@ test('/roster in Discord: commissioner role, captain limits, staff roles', async
   assert.match(await run({ id: '1', name: 'nobody' }, 'view', { team: String(a.id) }), /Owner: - · Captain: <@700>/);
 
   // The captain: free agents only, own team only, no commissioner commands.
-  assert.match(await run(captain, 'sign', { team: String(a.id), user: user(ann) }), /not in the free agent pool/);
+  assert.match(await run(captain, 'sign', { team: String(a.id), user: user(ann) }), /not a free agent/);
+  // Holding the free agent role is enough, even though nobody ran /roster freeagent for bob.
+  assert.match(await run(captain, 'sign', { team: String(a.id), user: user(bob), holds: ['fa-role'] }), /<@222> signed with/);
+  assert.deepEqual(calls.splice(0), ['222+role-a', '222-fa-role']);
   assert.match(await run(captain, 'freeagent', { user: user(ann) }), /Only a commissioner/);
   assert.match(await run(commish, 'freeagent', { user: user(ann) }), /is now a free agent/);
   calls.splice(0);

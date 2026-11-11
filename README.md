@@ -246,10 +246,17 @@ is allowed; two teams in the same league is refused. The site's roster editor fo
 
 1. Give the bot the **Manage Roles** permission, and drag its role above every team role and the
    free agent, owner and captain roles (Server Settings -> Roles). Discord refuses role changes otherwise.
-2. In `.env`, set `COMMISSIONER_ROLE_ID` to the role that may run every command. Optional:
-   `FREE_AGENT_ROLE_ID`, `OWNER_ROLE_ID` and `CAPTAIN_ROLE_ID` for the roles the bot hands out.
-   Restart the bot.
-3. Run `/roster setrole` once per team to say which role its players get.
+2. Run `/roster autoroles` (needs Manage Server the first time). It reads every role in the
+   server and fills in, by name:
+   - each team's role: a role named like the team ("Bangladesh", "Team Bangladesh");
+   - the commissioner, free agent, owner and captain roles: roles with those words in the name.
+
+   It only sets a pairing when there is exactly one candidate, never changes a role that is
+   already set, and lists everything it was unsure about. Run it again after creating or
+   renaming roles.
+3. For anything it could not match: `/roster setrole team role` for a team, or the matching line
+   in `.env` (`COMMISSIONER_ROLE_ID`, `FREE_AGENT_ROLE_ID`, `OWNER_ROLE_ID`, `CAPTAIN_ROLE_ID`).
+   A value in `.env` always wins over what the scan found.
 4. Run `/roster sync`. It gives current rosters their roles and lists what to fix by hand:
    players typed on the site with no Discord account (`/roster link`), old double signings, and
    teams with no role.
@@ -258,13 +265,19 @@ is allowed; two teams in the same league is refused. The site's roster editor fo
 
 | Level | Who | Can do |
 | --- | --- | --- |
-| Commissioner | Holds the `COMMISSIONER_ROLE_ID` role, or has Manage Server | Every command, any team. |
+| Commissioner | Holds the commissioner role, or has Manage Server | Every command, any team. |
 | Owner, captain | Set per team with `/roster staff` | For their own team only: sign a player from the free agent pool, release a player, change a player's slot. |
 | Everyone | | `/roster view`, `/roster freeagents`. |
 
 Owners and captains have the same powers; the two names only decide which Discord role they get.
-They cannot sign someone who is not in the free agent pool, trade a player to another team, or
-touch another team. A commissioner puts new players in the pool with `/roster freeagent`.
+They cannot sign someone who is not a free agent, trade a player to another team, or touch
+another team.
+
+**Who counts as a free agent:** anyone in the pool (`/roster freeagent`, or released with no team
+left), and anyone holding the `FREE_AGENT_ROLE_ID` role in Discord. So giving a new member the
+free agent role by hand is enough for a captain to sign them. `/roster freeagents` lists the
+pool only; a member who just holds the role appears there after `/roster sync` (if they have a
+player record) or once they are signed and released.
 
 | Command | Who | What |
 | --- | --- | --- |
@@ -276,7 +289,8 @@ touch another team. A commissioner puts new players in the pool with `/roster fr
 | `/roster staff team user position` | Commissioner | Makes a member an `owner` or `captain` of a team, or `remove`s them. Gives the team role and the Owner or Captain role. |
 | `/roster freeagent user` | Commissioner | Puts a member with no team in the pool and gives the free agent role. |
 | `/roster link user player` | Commissioner | Connects a member to a player record that already exists, so stats and roster spot stay with them. |
-| `/roster setrole team role` | Commissioner | The role a team's players get. |
+| `/roster autoroles` | Commissioner | Scans the server's roles and sets team roles and the commissioner, free agent, owner and captain roles by name. |
+| `/roster setrole team role` | Commissioner | The role a team's players get, set by hand. |
 | `/roster sync` | Commissioner | Makes everyone's team, free agent, owner and captain roles match the database. Other roles are never touched. |
 
 How it avoids mistakes:

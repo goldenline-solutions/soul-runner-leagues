@@ -36,6 +36,7 @@ export const commands = [{
       USER, { type: 3, name: 'player', description: 'Player record (not linked yet)', required: true, autocomplete: true },
     ]),
     sub('setrole', "Commissioners: set the Discord role a team's players get", [TEAM, { type: 8, name: 'role', description: 'The team role', required: true }]),
+    sub('autoroles', 'Commissioners: scan the server roles and match them to teams by name'),
     sub('sync', 'Commissioners: make everyone\'s roles match the rosters, and list problems'),
   ],
 }];
@@ -107,7 +108,9 @@ const ACTIONS = {
       : 'There are no free agents.');
   },
   sign: async (i, ctx) => {
-    const m = member(i);
+    // Holding the free agent role counts as being a free agent, even if nobody ran /roster freeagent.
+    const holdsRole = Boolean(ctx.freeAgentRoleId && i.options.getMember('user')?.roles.cache.has(ctx.freeAgentRoleId));
+    const m = { ...member(i), freeAgentRole: holdsRole };
     const r = await roster.sign(ctx.db, { teamId: teamId(i), member: m, slot: i.options.getString('slot'), by: i.user.id, actor: actor(i, ctx) });
     await loud(i, withWarnings(`✅ <@${m.id}> signed with **${r.team.name}** (${r.slot}).`, await applyRoles(i, ctx, m.id, r.roles)));
   },
@@ -135,6 +138,29 @@ const ACTIONS = {
     const teams = r.spots.map(s => s.team).join(' and ');
     await quiet(i, withWarnings(`<@${m.id}> is linked to the player record **${r.player.discord_tag}**${teams ? ` (on ${teams})` : ''}.`, await applyRoles(i, ctx, m.id, r.roles)));
   },
+  // Reads every role in the server and fills in team roles and the server-wide roles by name.
+  autoroles: async (i, ctx) => {
+    await i.deferReply({ flags: EPHEMERAL });
+    const all = [...(await i.guild.roles.fetch()).values()]
+      .filter(r => !r.managed && r.id !== i.guild.id) // not other bots' roles, not @everyone
+      .map(r => ({ id: r.id, name: r.name }));
+    const have = Object.fromEntries(Object.keys(roster.SPECIAL_ROLES).map(key => [key, ctx[`${key}RoleId`]]));
+    const r = await roster.autoAssignRoles(ctx.db, all, have);
+    const label = { commissioner: 'Commissioner', freeAgent: 'Free agent', owner: 'Owner', captain: 'Captain' };
+    const options = roles => roles.slice(0, 5).map(x => `<@&${x.id}>`).join(', ');
+    const lines = [
+      `Scanned ${all.length} roles. ${r.matched.length} team roles set now, ${r.alreadySet} were already set.`,
+      ...r.matched.map(m => `✅ **${m.team.name}** → <@&${m.role.id}>`),
+      ...r.special.set.map(x => `✅ ${label[x.key]} role → <@&${x.role.id}>`),
+      ...(r.unsure.length || r.special.unsure.length ? ['**More than one possible role; set these yourself:**'] : []),
+      ...r.unsure.map(u => `• **${u.team.name}**: ${options(u.roles)} (use \`/roster setrole\`)`),
+      ...r.special.unsure.map(u => `• ${label[u.key]} role: ${options(u.roles)} (set it in .env)`),
+      ...(r.none.length ? [`**No role found for:** ${r.none.map(team => team.name).join(', ')} (use \`/roster setrole\`)`] : []),
+      ...(r.special.none.length ? [`**No role found for:** ${r.special.none.map(key => label[key].toLowerCase()).join(', ')} (optional; create the role and run this again)`] : []),
+      'Run `/roster sync` to give the roles to current rosters.',
+    ];
+    await i.editReply({ content: lines.join('\n').slice(0, 1900), allowedMentions: { parse: [] } });
+  },
   setrole: async (i, { db }) => {
     const role = i.options.getRole('role');
     const team = await roster.setTeamRole(db, teamId(i), role.id);
@@ -146,12 +172,19 @@ const ACTIONS = {
     // The server-wide roles this bot hands out, next to the team roles.
     const flags = [['freeAgent', ctx.freeAgentRoleId], ['owner', ctx.ownerRoleId], ['captain', ctx.captainRoleId]].filter(([, role]) => role);
     const managed = [...teamRoleIds, ...flags.map(([, role]) => role)];
-    let fixed = 0;
+    let fixed = 0, adopted = 0;
     for (const p of members) {
       const guildMember = await i.guild.members.fetch(p.discord_id).catch(() => null);
       if (!guildMember) {
         if (p.roleIds.length) problems.push(`${p.tag} is on a roster but is not in the server.`);
         continue;
+      }
+      // Someone given the free agent role by hand joins the pool, instead of losing the role.
+      // (Refused when they are on a roster: then the role is simply removed below.)
+      if (ctx.freeAgentRoleId && !p.freeAgent && guildMember.roles.cache.has(ctx.freeAgentRoleId)) {
+        p.freeAgent = await roster.addFreeAgent(ctx.db, { member: { id: p.discord_id, name: p.tag }, by: i.user.id })
+          .then(() => true, err => { if (err instanceof UserError) return false; throw err; });
+        if (p.freeAgent) adopted++;
       }
       // Of the roles this bot manages, the member should hold exactly these.
       const should = new Set([...p.roleIds, ...flags.filter(([key]) => p[key]).map(([, role]) => role)]);
@@ -162,7 +195,7 @@ const ACTIONS = {
       if (warnings.length) problems.push(`${p.tag}: ${warnings[0]}`);
       else fixed++;
     }
-    const lines = [`Checked ${members.length} members. Roles fixed for ${fixed}.`,
+    const lines = [`Checked ${members.length} members. Roles fixed for ${fixed}.${adopted ? ` Added ${adopted} to the free agent pool because they hold the free agent role.` : ''}`,
       ...(problems.length ? ['**To fix by hand:**', ...problems.slice(0, 15).map(x => `• ${x}`)] : ['No problems found.']),
       ...(problems.length > 15 ? [`…and ${problems.length - 15} more`] : [])];
     await i.editReply({ content: lines.join('\n').slice(0, 1900), allowedMentions: { parse: [] } });
@@ -181,9 +214,18 @@ async function choices(db, { name, value }) {
   return players.map(p => ({ name: p.discord_tag.slice(0, 100), value: String(p.id) }));
 }
 
-export async function handle(interaction, ctx) {
-  if (interaction.isAutocomplete()) return interaction.respond(await choices(ctx.db, interaction.options.getFocused(true)));
+// The server-wide role ids: .env first, then what /roster autoroles found and saved.
+async function withRoles(base) {
+  const saved = await roster.savedRoles(base.db);
+  const ctx = { ...base };
+  for (const key of Object.keys(roster.SPECIAL_ROLES)) ctx[`${key}RoleId`] = base[`${key}RoleId`] || saved[key] || '';
+  return ctx;
+}
+
+export async function handle(interaction, base) {
+  if (interaction.isAutocomplete()) return interaction.respond(await choices(base.db, interaction.options.getFocused(true)));
   try {
+    const ctx = await withRoles(base);
     const key = interaction.options.getSubcommand();
     if (!OPEN_TO_ALL.includes(key) && !STAFF_TOO.includes(key) && !isCommissioner(interaction, ctx)) {
       throw new UserError('Only a commissioner can do that.', 403);

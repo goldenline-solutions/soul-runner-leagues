@@ -77,8 +77,10 @@ export async function sign(db, { teamId, member, slot, by, actor }) {
     await mustManage(t, actor, team);
     const player = await playerFor(t, member);
     const current = (await spotsOf(t, player.id)).find(s => s.league_id === team.league_id);
-    if (limited(actor) && !current && !player.free_agent) {
-      throw new UserError(`${member.name} is not in the free agent pool, so only a commissioner can sign them. A commissioner adds them with /roster freeagent.`, 403);
+    // A free agent is someone in the pool, or someone holding the free agent role in Discord
+    // (member.freeAgentRole, read by the bot), for members given the role by hand.
+    if (limited(actor) && !current && !player.free_agent && !member.freeAgentRole) {
+      throw new UserError(`${member.name} is not a free agent, so only a commissioner can sign them. A commissioner adds them with /roster freeagent, or gives them the free agent role.`, 403);
     }
     if (current) {
       throw new UserError(current.team_id === team.id
@@ -225,6 +227,75 @@ export async function setTeamRole(db, teamId, roleId) {
   const team = await getTeam(db, teamId);
   await db.run('UPDATE teams SET discord_role_id = ? WHERE id = ?', roleId ? String(roleId) : null, teamId);
   return team;
+}
+
+// ---------- finding roles by name ----------
+
+const plain = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Pairs teams with Discord roles by name. `roles` is [{ id, name }].
+// A role named exactly like the team wins ("Bangladesh" or "bangladesh!"); otherwise the role
+// name has to contain the team name, or the other way round ("Team Bangladesh"). A pairing is only
+// made when it is the single candidate on both sides: one role for the team, one team for the role.
+// Returns { matched: [{ team, role }], unsure: [{ team, roles }], none: [team] }.
+export function matchTeamRoles(teams, roles) {
+  const candidates = team => {
+    const name = plain(team.name);
+    const exact = roles.filter(r => plain(r.name) === name);
+    if (exact.length) return exact;
+    return name.length < 4 ? [] : roles.filter(r => {
+      const role = plain(r.name);
+      return role.length >= 4 && (role.includes(name) || name.includes(role));
+    });
+  };
+  const found = teams.map(team => ({ team, roles: candidates(team) }));
+  const claims = roleId => found.filter(f => f.roles.length === 1 && f.roles[0].id === roleId).length;
+  const out = { matched: [], unsure: [], none: [] };
+  for (const f of found) {
+    if (!f.roles.length) out.none.push(f.team);
+    else if (f.roles.length === 1 && claims(f.roles[0].id) === 1) out.matched.push({ team: f.team, role: f.roles[0] });
+    else out.unsure.push(f);
+  }
+  return out;
+}
+
+// The server-wide roles, found by what they are usually called.
+export const SPECIAL_ROLES = {
+  commissioner: /commissioner|commish/i,
+  freeAgent: /free\s*agents?|^fa$/i,
+  owner: /owner/i,
+  captain: /captain/i,
+};
+const SPECIAL_KEY = 'roster_roles';
+
+// Role ids saved by /roster autoroles: { commissioner, freeAgent, owner, captain }, each optional.
+export async function savedRoles(db) {
+  const row = await db.get('SELECT value FROM settings WHERE key = ?', SPECIAL_KEY);
+  return row ? JSON.parse(row.value) : {};
+}
+
+// Scans the server's roles and fills in what is not set yet: each team's role, and the four
+// server-wide roles. Nothing already set is changed. `have` is the server-wide roles already
+// known (from .env or an earlier run). Returns what it did, for the reply.
+export async function autoAssignRoles(db, roles, have = {}) {
+  const teams = await db.all(`${TEAM} ORDER BY l.sort, t.name`);
+  const taken = new Set(teams.map(team => team.discord_role_id).filter(Boolean));
+  const free = roles.filter(r => !taken.has(r.id));
+  const result = matchTeamRoles(teams.filter(team => !team.discord_role_id), free);
+  for (const { team, role } of result.matched) await db.run('UPDATE teams SET discord_role_id = ? WHERE id = ?', role.id, team.id);
+
+  const special = { set: [], unsure: [], none: [] };
+  const saved = await savedRoles(db);
+  for (const [key, pattern] of Object.entries(SPECIAL_ROLES)) {
+    if (have[key]) continue;
+    const hits = roles.filter(r => pattern.test(r.name.trim()));
+    if (hits.length === 1) { saved[key] = hits[0].id; special.set.push({ key, role: hits[0] }); }
+    else if (hits.length) special.unsure.push({ key, roles: hits });
+    else special.none.push(key);
+  }
+  await db.run(`INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value`, SPECIAL_KEY, JSON.stringify(saved));
+  return { ...result, alreadySet: teams.filter(team => team.discord_role_id).length, special };
 }
 
 export async function teamRoster(db, teamId) {
