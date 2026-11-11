@@ -304,7 +304,7 @@ export async function saveRules(db, body) {
 
 export const EXPORT_TABLES = ['leagues', 'teams', 'players', 'roster_slots', 'weeks', 'series', 'games', 'box_scores',
   'registrations', 'news', 'award_votes', 'settings', 'users', 'team_members', 'queue_entries', 'matches', 'match_results', 'scrim_box_scores',
-  'solo_matches', 'solo_queue_entries', 'solo_box_scores', 'roster_moves'];
+  'solo_matches', 'solo_queue_entries', 'solo_box_scores', 'roster_moves', 'team_staff'];
 
 export async function exportAll(db) {
   const out = { exported_at: new Date().toISOString() };

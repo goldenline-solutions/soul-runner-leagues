@@ -366,7 +366,19 @@ CREATE TABLE roster_moves (
 );
 CREATE INDEX roster_moves_player ON roster_moves (player_id);
 
-INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql');
+-- ===== 0009_team_staff.sql =====
+-- Who may run the limited roster commands for a team: its owners and captains (src/roster.js).
+-- Keyed by Discord id, because an owner does not have to be a player. Set with /roster staff.
+CREATE TABLE team_staff (
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  discord_id TEXT NOT NULL,
+  discord_name TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL CHECK (role IN ('owner', 'captain')),
+  PRIMARY KEY (team_id, discord_id)
+);
+CREATE INDEX team_staff_member ON team_staff (discord_id);
+
+INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql');
 
 -- ===== Season 1 data =====
 INSERT INTO leagues (id, name, season_name, blurb, sort) VALUES

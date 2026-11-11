@@ -2,6 +2,11 @@
 // shows. The rule this file enforces: a player is on at most ONE team per league (one Premier
 // team and one Affiliate team is allowed; two teams in the same league never is).
 //
+// Who may change a roster: commissioners can do everything. A team's owners and captains
+// (team_staff) can do three things for their own team only: sign a player from the free agent
+// pool, release a player, and change a player's slot. Callers pass `actor`:
+// { commissioner: true } or { commissioner: false, discordId }. No actor means a commissioner.
+//
 // Every change runs under one lock and is written to roster_moves. Functions that change who is
 // on a team return `roles`: which Discord roles the bot should add and remove (bot/roster.js).
 // Nothing here talks to Discord.
@@ -25,6 +30,15 @@ const spotsOf = (t, playerId) => t.all(`${SPOTS} WHERE rs.player_id = ? ORDER BY
 const log = (t, playerId, action, fromTeamId, toTeamId, by) => t.run(`INSERT INTO roster_moves
   (player_id, action, from_team_id, to_team_id, by_discord_id) VALUES (?, ?, ?, ?, ?)`, playerId, action, fromTeamId, toTeamId, by ?? null);
 const roleIds = (...ids) => ids.filter(Boolean);
+
+const isStaff = (t, teamId, discordId) => t.get('SELECT role FROM team_staff WHERE team_id = ? AND discord_id = ?', teamId, String(discordId));
+const limited = actor => Boolean(actor) && !actor.commissioner;
+// Owners and captains act only for their own team.
+async function mustManage(t, actor, team) {
+  if (limited(actor) && !(await isStaff(t, team.id, actor.discordId))) {
+    throw new UserError(`You can only do that for a team you own or captain, and ${team.name} is not one. Ask a commissioner.`, 403);
+  }
+}
 
 // The player record for a Discord member { id, name }. A record already linked to the account
 // wins; otherwise an unlinked record with the same name is linked; otherwise one is created.
@@ -56,12 +70,16 @@ async function emptySlot(t, team, wanted) {
 // ---------- signing, releasing, moving ----------
 
 // Signs a member to a team. Refused when they already have a team in that league.
-export async function sign(db, { teamId, member, slot, by }) {
+export async function sign(db, { teamId, member, slot, by, actor }) {
   return db.tx(async t => {
     await t.get(LOCK);
     const team = await getTeam(t, teamId);
+    await mustManage(t, actor, team);
     const player = await playerFor(t, member);
     const current = (await spotsOf(t, player.id)).find(s => s.league_id === team.league_id);
+    if (limited(actor) && !current && !player.free_agent) {
+      throw new UserError(`${member.name} is not in the free agent pool, so only a commissioner can sign them. A commissioner adds them with /roster freeagent.`, 403);
+    }
     if (current) {
       throw new UserError(current.team_id === team.id
         ? `${player.discord_tag} is already on ${team.name} (${current.slot}).`
@@ -77,7 +95,7 @@ export async function sign(db, { teamId, member, slot, by }) {
 
 // Releases a member from a team. `teamId` is only needed when they are on a team in each league.
 // Left with no team at all, they go into the free agent pool.
-export async function release(db, { member, teamId = null, by }) {
+export async function release(db, { member, teamId = null, by, actor }) {
   return db.tx(async t => {
     await t.get(LOCK);
     const player = await playerFor(t, member, { create: false });
@@ -86,18 +104,21 @@ export async function release(db, { member, teamId = null, by }) {
     if (!teamId && spots.length > 1) throw new UserError(`${player.discord_tag} is on ${spots.map(s => s.team).join(' and ')}. Say which team to release them from.`);
     const spot = teamId ? spots.find(s => s.team_id === teamId) : spots[0];
     if (!spot) throw new UserError(`${player.discord_tag} is not on that team. They are on ${spots.map(s => s.team).join(' and ')}.`, 404);
+    await mustManage(t, actor, { id: spot.team_id, name: spot.team });
 
     await t.run('UPDATE roster_slots SET player_id = NULL WHERE team_id = ? AND slot = ?', spot.team_id, spot.slot);
     const freeAgent = spots.length === 1;
     if (freeAgent) await t.run('UPDATE players SET free_agent = true WHERE id = ?', player.id);
     await log(t, player.id, 'release', spot.team_id, null, by);
-    return { player, team: { id: spot.team_id, name: spot.team }, freeAgent, roles: { add: [], remove: roleIds(spot.discord_role_id), freeAgent } };
+    // An owner or captain of the team keeps its role even when they come off the roster.
+    const keepsRole = await isStaff(t, spot.team_id, member.id);
+    return { player, team: { id: spot.team_id, name: spot.team }, freeAgent, roles: { add: [], remove: keepsRole ? [] : roleIds(spot.discord_role_id), freeAgent } };
   });
 }
 
 // Moves a member to another team in the same league (a trade or transfer) in one step, so there
 // is no moment where they are on both or on neither. On their own team it changes their slot.
-export async function move(db, { member, teamId, slot, by }) {
+export async function move(db, { member, teamId, slot, by, actor }) {
   return db.tx(async t => {
     await t.get(LOCK);
     const team = await getTeam(t, teamId);
@@ -105,15 +126,20 @@ export async function move(db, { member, teamId, slot, by }) {
     const from = player && (await spotsOf(t, player.id)).find(s => s.league_id === team.league_id);
     if (!from) throw new UserError(`${member.name} has no ${team.league} team to move from. Use /roster sign.`, 404);
     if (from.team_id === team.id && (!slot || slot === from.slot)) throw new UserError(`${player.discord_tag} is already on ${team.name} (${from.slot}).`, 409);
+    if (limited(actor)) {
+      if (from.team_id !== team.id) throw new UserError('Moving a player between teams is a trade: only a commissioner can do that. You can change the slot of a player on your own team.', 403);
+      await mustManage(t, actor, team);
+    }
 
     const into = await emptySlot(t, team, slot);
     await t.run('UPDATE roster_slots SET player_id = NULL WHERE team_id = ? AND slot = ?', from.team_id, from.slot);
     await t.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?', player.id, team.id, into);
     await log(t, player.id, 'move', from.team_id, team.id, by);
     const changedTeam = from.team_id !== team.id;
+    const leaves = changedTeam && !(await isStaff(t, from.team_id, member.id));
     return {
       player, team, slot: into, from: { id: from.team_id, name: from.team, slot: from.slot },
-      roles: { add: changedTeam ? roleIds(team.discord_role_id) : [], remove: changedTeam ? roleIds(from.discord_role_id) : [], freeAgent: false },
+      roles: { add: changedTeam ? roleIds(team.discord_role_id) : [], remove: leaves ? roleIds(from.discord_role_id) : [], freeAgent: false },
     };
   });
 }
@@ -137,6 +163,43 @@ export async function addFreeAgent(db, { member, by }) {
 export const freeAgents = db => db.all(`SELECT p.id, p.discord_tag AS tag, p.discord_id,
     (SELECT MAX(m.created_at) FROM roster_moves m WHERE m.player_id = p.id) AS since
   FROM players p WHERE p.free_agent ORDER BY since NULLS LAST, lower(p.discord_tag)`);
+
+// ---------- owners and captains ----------
+
+export const STAFF_ROLES = ['owner', 'captain'];
+
+// Makes a member an owner or captain of a team, or (role null) takes that away.
+// `roles.owner` / `roles.captain` say whether they should hold the server-wide Owner and Captain
+// roles afterwards: true while they hold that position on any team.
+export async function setStaff(db, { teamId, member, role }) {
+  if (role !== null && !STAFF_ROLES.includes(role)) throw new UserError('Position must be owner or captain.');
+  return db.tx(async t => {
+    await t.get(LOCK);
+    const team = await getTeam(t, teamId);
+    if (role) {
+      await t.run(`INSERT INTO team_staff (team_id, discord_id, discord_name, role) VALUES (?, ?, ?, ?)
+        ON CONFLICT (team_id, discord_id) DO UPDATE SET role = excluded.role, discord_name = excluded.discord_name`,
+      team.id, String(member.id), String(member.name).slice(0, 64), role);
+    } else {
+      if (!(await isStaff(t, team.id, member.id))) throw new UserError(`${member.name} is not an owner or captain of ${team.name}.`, 404);
+      await t.run('DELETE FROM team_staff WHERE team_id = ? AND discord_id = ?', team.id, String(member.id));
+    }
+    const now = (await t.all('SELECT role FROM team_staff WHERE discord_id = ?', String(member.id))).map(r => r.role);
+    // Coming off the staff, they keep the team role only if they still play for the team.
+    const plays = await t.get(`SELECT 1 AS x FROM roster_slots rs JOIN players p ON p.id = rs.player_id
+      WHERE rs.team_id = ? AND p.discord_id = ?`, team.id, String(member.id));
+    return {
+      team, role,
+      roles: {
+        add: role ? roleIds(team.discord_role_id) : [], remove: role || plays ? [] : roleIds(team.discord_role_id),
+        owner: now.includes('owner'), captain: now.includes('captain'),
+      },
+    };
+  });
+}
+
+export const teamStaff = (db, teamId) => db.all(`SELECT discord_id, discord_name, role FROM team_staff
+  WHERE team_id = ? ORDER BY role DESC, lower(discord_name)`, teamId);
 
 // ---------- records, roles, reading ----------
 
@@ -168,15 +231,15 @@ export async function teamRoster(db, teamId) {
   const team = await getTeam(db, teamId);
   const rows = await db.all(`SELECT rs.slot, p.id AS player_id, p.discord_tag AS tag, p.discord_id
     FROM roster_slots rs LEFT JOIN players p ON p.id = rs.player_id WHERE rs.team_id = ?`, teamId);
-  return { team, slots: ROSTER_SLOTS.map(slot => rows.find(r => r.slot === slot) ?? { slot, player_id: null }) };
+  return { team, staff: await teamStaff(db, teamId), slots: ROSTER_SLOTS.map(slot => rows.find(r => r.slot === slot) ?? { slot, player_id: null }) };
 }
 
 // Used by the site's roster editor too: the team in this league that already has the player.
 export const otherTeamInLeague = (db, playerId, team) => db.get(`${SPOTS}
   WHERE rs.player_id = ? AND t.league_id = ? AND t.id <> ?`, playerId, team.league_id, team.id);
 
-// What Discord should look like, for /roster sync: every linked player with the roles they should
-// hold, plus the things a commissioner has to fix by hand.
+// What Discord should look like, for /roster sync: every linked player, owner and captain with the
+// roles they should hold, plus the things a commissioner has to fix by hand.
 export async function audit(db) {
   const teams = await db.all(`${TEAM} ORDER BY l.sort, t.name`);
   const spots = await db.all(`${SPOTS} WHERE rs.player_id IS NOT NULL`);
@@ -195,13 +258,22 @@ export async function audit(db) {
   const noRole = teams.filter(team => !team.discord_role_id && spots.some(s => s.team_id === team.id)).map(team => team.name);
   if (noRole.length) problems.push(`Teams with no Discord role (use /roster setrole): ${noRole.join(', ')}`);
 
-  const players = await db.all('SELECT id, discord_tag AS tag, discord_id, free_agent FROM players WHERE discord_id IS NOT NULL');
-  return {
-    teamRoleIds: roleIds(...teams.map(team => team.discord_role_id)),
-    players: players.map(p => ({
-      tag: p.tag, discord_id: p.discord_id, freeAgent: p.free_agent,
-      roleIds: roleIds(...held.filter(h => h.player_id === p.id).map(h => h.discord_role_id)),
-    })),
-    problems,
+  // One entry per Discord account: linked players, plus owners and captains (who may not play).
+  const members = new Map();
+  const entry = (discordId, tag) => {
+    if (!members.has(discordId)) members.set(discordId, { tag, discord_id: discordId, freeAgent: false, roleIds: [], owner: false, captain: false });
+    return members.get(discordId);
   };
+  for (const p of await db.all('SELECT id, discord_tag AS tag, discord_id, free_agent FROM players WHERE discord_id IS NOT NULL ORDER BY id')) {
+    const e = entry(p.discord_id, p.tag);
+    e.freeAgent = p.free_agent;
+    e.roleIds.push(...roleIds(...held.filter(h => h.player_id === p.id).map(h => h.discord_role_id)));
+  }
+  for (const st of await db.all('SELECT team_id, discord_id, discord_name, role FROM team_staff ORDER BY team_id')) {
+    const e = entry(st.discord_id, st.discord_name);
+    e[st.role] = true;
+    const role = teams.find(team => team.id === st.team_id)?.discord_role_id;
+    if (role && !e.roleIds.includes(role)) e.roleIds.push(role);
+  }
+  return { teamRoleIds: roleIds(...teams.map(team => team.discord_role_id)), members: [...members.values()], problems };
 }

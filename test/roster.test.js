@@ -120,7 +120,7 @@ test('link connects a member to an existing record, and audit lists what needs f
 
   report = await roster.audit(db);
   assert.deepEqual(report.problems, []);
-  assert.deepEqual(report.players, [{ tag: 'OldTag', discord_id: '111', freeAgent: false, roleIds: ['role-a'] }]);
+  assert.deepEqual(report.members, [{ tag: 'OldTag', discord_id: '111', freeAgent: false, roleIds: ['role-a'], owner: false, captain: false }]);
 });
 
 // ---------- Discord ----------
@@ -154,7 +154,8 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
   };
   const user = { id: '111', username: 'ann' };
 
-  assert.match(await run('sign', { team: String(a.id), user }, false), /Only a commissioner/);
+  assert.match(await run('sign', { team: String(a.id), user }, false), /only do that for a team you own or captain/);
+  assert.match(await run('setrole', { team: String(a.id), role: 'role-a' }, false), /Only a commissioner/);
   assert.match(await run('setrole', { team: String(a.id), role: 'role-a' }), /players now get <@&role-a>/);
   await run('setrole', { team: String(b.id), role: 'role-b' });
 
@@ -179,7 +180,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
   // Sync: ann should hold only team A's role. The stale role is not a managed role, so it is left alone.
   await run('setrole', { team: String(a.id), role: 'role-a' });
   held[111].add('role-b');
-  assert.match(await run('sync'), /Checked 1 linked players\. Roles fixed for 1\.\nNo problems found\./);
+  assert.match(await run('sync'), /Checked 1 members\. Roles fixed for 1\.\nNo problems found\./);
   assert.deepEqual(calls.splice(0), ['+role-a', '-role-b']);
   assert.deepEqual([...held[111]].sort(), ['role-a', 'stale-role']);
   assert.match(await run('sync'), /Roles fixed for 0/);

@@ -36,6 +36,7 @@ const ctx = {
   db, ingest: ingestConfig(env), siteUrl: env.SITE_URL || '',
   queueChannelId: env.SCRIM_QUEUE_CHANNEL_ID || '', adminRoleId: env.SCRIM_ADMIN_ROLE_ID || '',
   soloChannelId: env.SOLO_QUEUE_CHANNEL_ID || '', freeAgentRoleId: env.FREE_AGENT_ROLE_ID || '',
+  commissionerRoleId: env.COMMISSIONER_ROLE_ID || '', ownerRoleId: env.OWNER_ROLE_ID || '', captainRoleId: env.CAPTAIN_ROLE_ID || '',
 };
 if (!ctx.ingest.apiKey) console.warn('OPENAI_API_KEY is not set: /boxscore will answer that screenshot reading is not set up.');
 

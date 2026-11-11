@@ -235,7 +235,7 @@ accept timeout also runs in the bot, so the bot has to be running for the queue 
 
 ## Roster management
 
-Commissioners manage rosters from Discord with `/roster`. It writes the same `roster_slots` rows
+Rosters are managed from Discord with `/roster`. It writes the same `roster_slots` rows
 the site shows, so a signing appears on the team page at once. Code: `src/roster.js` (rules),
 `bot/roster.js` (commands and roles).
 
@@ -245,24 +245,39 @@ is allowed; two teams in the same league is refused. The site's roster editor fo
 **Setup**
 
 1. Give the bot the **Manage Roles** permission, and drag its role above every team role and the
-   free agent role (Server Settings -> Roles). Discord refuses role changes otherwise.
-2. Optional: set `FREE_AGENT_ROLE_ID` in `.env` to the role free agents hold, and restart the bot.
+   free agent, owner and captain roles (Server Settings -> Roles). Discord refuses role changes otherwise.
+2. In `.env`, set `COMMISSIONER_ROLE_ID` to the role that may run every command. Optional:
+   `FREE_AGENT_ROLE_ID`, `OWNER_ROLE_ID` and `CAPTAIN_ROLE_ID` for the roles the bot hands out.
+   Restart the bot.
 3. Run `/roster setrole` once per team to say which role its players get.
 4. Run `/roster sync`. It gives current rosters their roles and lists what to fix by hand:
    players typed on the site with no Discord account (`/roster link`), old double signings, and
    teams with no role.
 
+**Who can do what**
+
+| Level | Who | Can do |
+| --- | --- | --- |
+| Commissioner | Holds the `COMMISSIONER_ROLE_ID` role, or has Manage Server | Every command, any team. |
+| Owner, captain | Set per team with `/roster staff` | For their own team only: sign a player from the free agent pool, release a player, change a player's slot. |
+| Everyone | | `/roster view`, `/roster freeagents`. |
+
+Owners and captains have the same powers; the two names only decide which Discord role they get.
+They cannot sign someone who is not in the free agent pool, trade a player to another team, or
+touch another team. A commissioner puts new players in the pool with `/roster freeagent`.
+
 | Command | Who | What |
 | --- | --- | --- |
-| `/roster view team` | Anyone | The seven slots and who holds them. |
+| `/roster view team` | Anyone | Owner, captain, and the seven slots. |
 | `/roster freeagents` | Anyone | The free agent pool. |
-| `/roster sign team user [slot]` | Manage Server | Signs into the slot given, or the first empty one. Adds the team role, removes the free agent role. |
-| `/roster release user [team]` | Manage Server | Frees the slot and removes the team role. With no team left, the player becomes a free agent. |
-| `/roster move user team [slot]` | Manage Server | Changes teams inside a league in one step (roles swap), or changes slot on the same team. |
-| `/roster freeagent user` | Manage Server | Puts a member with no team in the pool and gives the free agent role. |
-| `/roster link user player` | Manage Server | Connects a member to a player record that already exists, so stats and roster spot stay with them. |
-| `/roster setrole team role` | Manage Server | The role a team's players get. |
-| `/roster sync` | Manage Server | Makes everyone's team and free agent roles match the rosters. Other roles are never touched. |
+| `/roster sign team user [slot]` | Commissioner; owner or captain (free agents, own team) | Signs into the slot given, or the first empty one. Adds the team role, removes the free agent role. |
+| `/roster release user [team]` | Commissioner; owner or captain (own team) | Frees the slot and removes the team role. With no team left, the player becomes a free agent. |
+| `/roster move user team [slot]` | Commissioner; owner or captain (slot change only) | Changes teams inside a league in one step (roles swap), or changes slot on the same team. |
+| `/roster staff team user position` | Commissioner | Makes a member an `owner` or `captain` of a team, or `remove`s them. Gives the team role and the Owner or Captain role. |
+| `/roster freeagent user` | Commissioner | Puts a member with no team in the pool and gives the free agent role. |
+| `/roster link user player` | Commissioner | Connects a member to a player record that already exists, so stats and roster spot stay with them. |
+| `/roster setrole team role` | Commissioner | The role a team's players get. |
+| `/roster sync` | Commissioner | Makes everyone's team, free agent, owner and captain roles match the database. Other roles are never touched. |
 
 How it avoids mistakes:
 
@@ -274,8 +289,8 @@ How it avoids mistakes:
 - If Discord refuses a role change, the roster change still stands and the reply says which role
   failed. Fix the permission, then run `/roster sync`.
 
-Rosters and scrim teams are separate: `/roster sign` does not make someone a scrim captain or
-member (`/team captain`, `/team add`), because a scrim account is on one team and a player can
+Rosters and scrim teams are separate: `/roster sign` and `/roster staff` do not make someone a
+scrim captain or member (`/team captain`, `/team add`, still Manage Server only), because a scrim account is on one team and a player can
 be on two.
 
 ## Solo queue

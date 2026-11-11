@@ -139,7 +139,7 @@ test('db/setup.sql is current and builds the same database on its own', async ()
   const n = async t => (await lite.query(`SELECT COUNT(*)::int AS n FROM ${t}`)).rows[0].n;
   assert.equal(await n('teams'), 18);
   assert.equal(await n('series'), 199);
-  assert.equal(await n('_migrations'), 8);
+  assert.equal(await n('_migrations'), 9);
   await lite.close();
 });
 
