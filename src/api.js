@@ -1,4 +1,5 @@
 import { ROSTER_SLOTS } from './seed.js';
+import { otherTeamInLeague } from './roster.js';
 import { STAT_KEYS, UserError, saveGame, deleteGame, playerIdForTag, fillRosters } from './league.js';
 
 const sumCols = STAT_KEYS.map(k => `SUM(b.${k})::int AS ${k}`).join(', ');
@@ -227,10 +228,18 @@ export async function updateTeam(db, id, body) {
   await db.tx(async t => {
     await t.run('UPDATE teams SET owner_coach = ?, stream_url = ?, sponsors = ?, affiliated_teams = ? WHERE id = ?',
       fields.owner_coach, fields.stream_url, fields.sponsors, fields.affiliated_teams, id);
+    const placed = new Set();
     for (const slot of ROSTER_SLOTS) {
       const tag = text(body.roster?.[slot], 64);
-      await t.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?',
-        tag ? await playerIdForTag(t, tag) : null, id, slot);
+      const playerId = tag ? await playerIdForTag(t, tag) : null;
+      if (playerId) {
+        // Same rule as the Discord roster commands (src/roster.js): one team per league.
+        if (placed.has(playerId)) throw new UserError(`${tag} is in two slots. A player takes one.`);
+        placed.add(playerId);
+        const other = await otherTeamInLeague(t, playerId, team);
+        if (other) throw new UserError(`${tag} is already on ${other.team} in this league. Release them there first.`, 409);
+      }
+      await t.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?', playerId, id, slot);
     }
   });
 }
@@ -295,7 +304,7 @@ export async function saveRules(db, body) {
 
 export const EXPORT_TABLES = ['leagues', 'teams', 'players', 'roster_slots', 'weeks', 'series', 'games', 'box_scores',
   'registrations', 'news', 'award_votes', 'settings', 'users', 'team_members', 'queue_entries', 'matches', 'match_results', 'scrim_box_scores',
-  'solo_matches', 'solo_queue_entries', 'solo_box_scores'];
+  'solo_matches', 'solo_queue_entries', 'solo_box_scores', 'roster_moves'];
 
 export async function exportAll(db) {
   const out = { exported_at: new Date().toISOString() };

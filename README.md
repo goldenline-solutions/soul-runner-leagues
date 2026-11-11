@@ -233,6 +233,51 @@ Site API (JSON; writes need a Discord login cookie from `GET /api/auth/discord`)
 A match made from the site gets its Discord thread on the bot's next 30 second tick. The 5 minute
 accept timeout also runs in the bot, so the bot has to be running for the queue to work fully.
 
+## Roster management
+
+Commissioners manage rosters from Discord with `/roster`. It writes the same `roster_slots` rows
+the site shows, so a signing appears on the team page at once. Code: `src/roster.js` (rules),
+`bot/roster.js` (commands and roles).
+
+**The rule:** a player is on at most one team per league. One Premier team and one Affiliate team
+is allowed; two teams in the same league is refused. The site's roster editor follows the same rule.
+
+**Setup**
+
+1. Give the bot the **Manage Roles** permission, and drag its role above every team role and the
+   free agent role (Server Settings -> Roles). Discord refuses role changes otherwise.
+2. Optional: set `FREE_AGENT_ROLE_ID` in `.env` to the role free agents hold, and restart the bot.
+3. Run `/roster setrole` once per team to say which role its players get.
+4. Run `/roster sync`. It gives current rosters their roles and lists what to fix by hand:
+   players typed on the site with no Discord account (`/roster link`), old double signings, and
+   teams with no role.
+
+| Command | Who | What |
+| --- | --- | --- |
+| `/roster view team` | Anyone | The seven slots and who holds them. |
+| `/roster freeagents` | Anyone | The free agent pool. |
+| `/roster sign team user [slot]` | Manage Server | Signs into the slot given, or the first empty one. Adds the team role, removes the free agent role. |
+| `/roster release user [team]` | Manage Server | Frees the slot and removes the team role. With no team left, the player becomes a free agent. |
+| `/roster move user team [slot]` | Manage Server | Changes teams inside a league in one step (roles swap), or changes slot on the same team. |
+| `/roster freeagent user` | Manage Server | Puts a member with no team in the pool and gives the free agent role. |
+| `/roster link user player` | Manage Server | Connects a member to a player record that already exists, so stats and roster spot stay with them. |
+| `/roster setrole team role` | Manage Server | The role a team's players get. |
+| `/roster sync` | Manage Server | Makes everyone's team and free agent roles match the rosters. Other roles are never touched. |
+
+How it avoids mistakes:
+
+- Signing works on the Discord member, not a typed name. The first signing links the member to a
+  player record with the same name if one exists, and creates one otherwise.
+- All changes run one at a time under a database lock, so two commissioners can't sign the same
+  player at the same moment.
+- Every signing, release and move is written to `roster_moves` with who did it and when.
+- If Discord refuses a role change, the roster change still stands and the reply says which role
+  failed. Fix the permission, then run `/roster sync`.
+
+Rosters and scrim teams are separate: `/roster sign` does not make someone a scrim captain or
+member (`/team captain`, `/team add`), because a scrim account is on one team and a player can
+be on two.
+
 ## Solo queue
 
 Players without a team queue alone and get placed by position. Separate from the scrim queue:
@@ -318,8 +363,9 @@ src/auth.js            commissioner login cookie, one-vote-per-browser id
 src/ingest*.js         screenshot reading
 src/scrim.js           scrim queue: join/leave, the matcher, accept, report, confirm
 src/solo.js            solo queue: position seating, accept, report
+src/roster.js          roster rules: sign, release, move, free agents
 src/discord-oauth.js   "Log in with Discord" for the site
-bot/                   Discord bot: index.js (startup, routing), boxscore.js (screenshot reading), scrim.js (scrim queue), solo.js (solo queue)
+bot/                   Discord bot: index.js (startup, routing), boxscore.js (screenshot reading), scrim.js (scrim queue), solo.js (solo queue), roster.js (rosters and roles)
 migrations/            schema, applied in order
 db/setup.sql           whole database in one script (generated)
 scripts/               db:setup, db:sql, db:backup
