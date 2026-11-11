@@ -275,9 +275,11 @@ another team.
 
 **Who counts as a free agent:** anyone in the pool (`/roster freeagent`, or released with no team
 left), and anyone holding the `FREE_AGENT_ROLE_ID` role in Discord. So giving a new member the
-free agent role by hand is enough for a captain to sign them. `/roster freeagents` lists the
-pool only; a member who just holds the role appears there after `/roster sync` (if they have a
-player record) or once they are signed and released.
+free agent role by hand is enough for a captain to sign them. `/roster freeagents` and
+`/roster sync` first add everyone holding the role to the pool, so the list matches Discord.
+Reading who holds a role needs **Server Members Intent** turned on for the bot (Discord Developer
+Portal -> your app -> Bot -> Privileged Gateway Intents); without it the reply says so and shows
+the pool only.
 
 | Command | Who | What |
 | --- | --- | --- |

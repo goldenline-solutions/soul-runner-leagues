@@ -71,6 +71,31 @@ async function applyRoles(i, ctx, discordId, { add, remove, freeAgent, owner, ca
   return warnings;
 }
 
+// Everyone holding the free agent role in Discord joins the pool, so the role and the pool agree
+// however the role was given. Members on a roster are skipped (sync takes the role off them).
+// Returns a note for the reply when the role holders could not be read, else ''.
+async function adoptRoleHolders(i, ctx) {
+  if (!ctx.freeAgentRoleId) return 'No free agent role is set, so only the pool is shown. Run `/roster autoroles`, or set `FREE_AGENT_ROLE_ID`.';
+  const holders = [];
+  try {
+    for (let after; ;) { // the member list comes 1000 at a time
+      const page = [...(await i.guild.members.list({ limit: 1000, after })).values()];
+      holders.push(...page.filter(m => !m.user.bot && m.roles.cache.has(ctx.freeAgentRoleId)));
+      if (page.length < 1000) break;
+      after = page.at(-1).user.id;
+    }
+  } catch (err) {
+    return `Could not read who holds <@&${ctx.freeAgentRoleId}> (${err.message}), so only the pool is shown. `
+      + 'Turn on **Server Members Intent** for the bot: Discord Developer Portal → your app → Bot → Privileged Gateway Intents.';
+  }
+  const inPool = new Set((await roster.freeAgents(ctx.db)).map(p => p.discord_id));
+  for (const m of holders.filter(h => !inPool.has(h.user.id))) {
+    await roster.addFreeAgent(ctx.db, { member: { id: m.user.id, name: m.user.username }, by: i.user.id })
+      .catch(err => { if (!(err instanceof UserError)) throw err; }); // on a roster, or their name belongs to another record
+  }
+  return '';
+}
+
 const withWarnings = (text, warnings) => (warnings.length
   ? `${text}\n⚠️ ${warnings.join('\n⚠️ ')}\nCheck that the bot has Manage Roles and that its role is above these roles, then run \`/roster sync\`.`
   : text);
@@ -101,11 +126,14 @@ const ACTIONS = {
     const text = r.role ? `<@${m.id}> is now ${r.role === 'owner' ? 'an owner' : 'a captain'} of **${r.team.name}**.` : `<@${m.id}> is no longer an owner or captain of **${r.team.name}**.`;
     await loud(i, withWarnings(text, await applyRoles(i, ctx, m.id, r.roles)));
   },
-  freeagents: async (i, { db }) => {
-    const list = await roster.freeAgents(db);
-    await quiet(i, list.length
+  freeagents: async (i, ctx) => {
+    await i.deferReply({ flags: EPHEMERAL });
+    const note = await adoptRoleHolders(i, ctx);
+    const list = await roster.freeAgents(ctx.db);
+    const body = list.length
       ? `**Free agents (${list.length})**\n${list.slice(0, 40).map(p => `• ${who(p)}`).join('\n')}${list.length > 40 ? `\n…and ${list.length - 40} more` : ''}`
-      : 'There are no free agents.');
+      : 'There are no free agents.';
+    await i.editReply({ content: `${body}${note ? `\n\n${note}` : ''}`.slice(0, 1900), allowedMentions: { parse: [] } });
   },
   sign: async (i, ctx) => {
     // Holding the free agent role counts as being a free agent, even if nobody ran /roster freeagent.
@@ -168,7 +196,9 @@ const ACTIONS = {
   },
   sync: async (i, ctx) => {
     await i.deferReply({ flags: EPHEMERAL });
+    const note = await adoptRoleHolders(i, ctx);
     const { teamRoleIds, members, problems } = await roster.audit(ctx.db);
+    if (note && ctx.freeAgentRoleId) problems.push(note);
     // The server-wide roles this bot hands out, next to the team roles.
     const flags = [['freeAgent', ctx.freeAgentRoleId], ['owner', ctx.ownerRoleId], ['captain', ctx.captainRoleId]].filter(([, role]) => role);
     const managed = [...teamRoleIds, ...flags.map(([, role]) => role)];

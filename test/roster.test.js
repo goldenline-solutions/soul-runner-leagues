@@ -133,6 +133,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
     members: {
       addRole: async ({ user, role }) => { if (role === 'broken') throw new Error('Missing Permissions'); calls.push(`+${role}`); (held[user] ??= new Set()).add(role); },
       removeRole: async ({ user, role }) => { calls.push(`-${role}`); held[user]?.delete(role); },
+      list: async () => new Map(), // nobody else in the server holds the free agent role
       fetch: async id => (held[id] ? { roles: { cache: { has: r => held[id].has(r) } } } : Promise.reject(new Error('Unknown Member'))),
     },
   };
