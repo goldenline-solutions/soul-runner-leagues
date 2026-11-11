@@ -93,6 +93,146 @@ To turn it on, set `OPENAI_API_KEY` (in `.env` locally, or in the Vercel project
 
 Without a key, manual and paste entry still work.
 
+## Discord bot
+
+The bot reads box score screenshots from Discord with the same pipeline as Upload Results. It is
+its own process (`npm run bot`) and has to run on an always-on machine: Vercel can't host it.
+
+Set it up once:
+
+1. https://discord.com/developers/applications → **New Application** → **Bot** → **Reset Token**.
+   Put the token in `.env` as `DISCORD_TOKEN`. No privileged intents are needed.
+2. Set `DISCORD_GUILD_ID` (right-click the server → Copy Server ID) and `SITE_URL` in `.env`.
+   Use the same `DATABASE_URL` and `OPENAI_API_KEY` as the site.
+3. `npm run bot`. It prints an invite link: open it and add the bot to the server.
+
+Then, in Discord:
+
+- `/boxscore screenshot:<image>` reads an uploaded screenshot.
+- Right-click a message with a screenshot → **Apps** → **Read box score**.
+
+The bot replies with both teams' lines and anything to check.
+
+- **It finds the matchup itself.** When each side of the screenshot has at least two players from
+  one team's roster, the bot picks the earliest matchup between those two teams that is still being
+  played, names the teams and flips the sides if needed.
+- **Save as Game N.** With a matchup found, the reply has a Save button. Only members with
+  **Manage Server** can press it. If the box score has names the league doesn't know (marked `*`),
+  the first press turns the button into "Add N new players and save", because saving creates
+  those players; fix a misread name in Upload Results instead.
+- **No button** when the bot can't tell the matchup, the series is already decided, or the same
+  players and score are already recorded. Save those from Upload Results: the reading is stored,
+  so dropping the same image file there reuses it with no second model call (unless the site had
+  to shrink it first).
+
+Both commands start limited to members with **Manage Server**; change who can use them in Server
+Settings → Integrations.
+
+**Keeping it running.** On the league server the bot runs under pm2 as `soulrunner-bot` and comes
+back after a reboot with the rest of the pm2 list. After changing bot code: `pm2 restart soulrunner-bot`.
+Logs: `pm2 logs soulrunner-bot`. Don't also start `npm run bot` in a terminal: two copies would
+both answer.
+
+New bot features go in `bot/` as a file exporting `{ commands, names, handle }`, added to
+`FEATURES` in `bot/index.js`. A feature with buttons or forms also exports `prefix` (the start of
+its component ids), and one that needs a timer exports `start(client, ctx)`.
+
+## Scrim queue
+
+Teams mark themselves ready, the queue pairs them, and the bot opens a private thread where they
+swap gamertags and set the game up themselves. Nothing touches NBA 2K. The bot and the site share
+one queue: both call `src/scrim.js`, and all of it lives in the database.
+
+Set it up once:
+
+1. In `.env`, set `SCRIM_QUEUE_CHANNEL_ID` (the `#scrim-queue` channel) and `SCRIM_ADMIN_ROLE_ID`
+   (pinged on disputes; make the role mentionable).
+2. Restart the bot and re-invite it with the link it prints. It now asks for: View Channel, Send
+   Messages, Embed Links, Pin Messages, Create Private Threads, Send Messages in Threads, Manage Threads.
+3. For browser login, set `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET`, and add the redirect
+   `SITE_URL/api/auth/discord/callback` in the developer portal under OAuth2.
+4. Name the captains: `/team captain team:<team> user:<member>`. Only captains can queue, accept,
+   host, report, confirm or dispute. A person is on one team; a team can have several captains.
+
+The bot posts one pinned message in the queue channel and edits it when the queue changes. Its
+**Join Queue** button opens a form for mode, size and minutes.
+
+| Command | Who | What it does |
+| --- | --- | --- |
+| `/queue join [mode] [size] [minutes_available] [skill_min] [skill_max]` | captain | Queues the team. Defaults: scrim, 5v5, 60 minutes. |
+| `/queue leave` | captain | Cancels the waiting entry. |
+| `/queue status` | team member | The team's entry or current match. |
+| `/queue list` | anyone | Who is waiting: team, mode, size, how long. Never ratings. |
+| `/match accept`, `/match decline` | captain | Answer a new match (also buttons on the match card). |
+| `/match host team:<mine or theirs>` | captain | Records who hosts the lobby. |
+| `/match report score_a score_b screenshot` | captain | Reports the score. `score_a` is the first team on the match card. |
+| `/match confirm` | other captain | Confirms the reported result (also a button; a commissioner can press it too). |
+| `/match dispute` | captain | Marks the match disputed and pings the admin role. |
+| `/team captain`, `/team add`, `/team remove`, `/team disband` | Manage Server | Who is on which team. |
+| `/team testopponent [mode] [size]` | Manage Server | Testing: queues a fake opponent that never answers. |
+
+Match lifecycle:
+
+1. **Queue.** An entry waits until its window ends (`expired`) or the captain leaves (`cancelled`).
+2. **Matcher** (`runMatcher` in `src/scrim.js`). Runs on every join and every 30 seconds in the bot.
+   Oldest entry first, it takes the oldest other entry with the same mode and size whose skill
+   window overlaps. Both entries become `matched`.
+3. **`pending_accept`.** The bot opens a private thread for both teams' members and posts the match
+   card. Both captains have 5 minutes.
+   - Both accept → `accepted`.
+   - One declines → `cancelled`. The decliner leaves the queue; the other team goes back in line.
+   - Time runs out → `cancelled`. A team that accepted goes back in line; a team that never
+     answered leaves the queue.
+4. **`accepted` → `in_progress`** once a captain records the host. This step can be skipped.
+5. **`awaiting_result`** after `/match report`. The screenshot is stored in the `screenshots` table.
+   For 5v5, with `OPENAI_API_KEY` set, it is also read and a score that doesn't match is flagged.
+6. **`completed`** when the other captain confirms. The thread is archived 24 hours later.
+7. **`disputed`** at any point after both accepted. Both teams can queue again; a commissioner
+   settles it in the thread.
+
+A team can't queue while it has a match in steps 3 to 5. If a team loses its last captain or is
+disbanded, its entry is cancelled, its match is cancelled, and the opponent goes back in line.
+
+**Scrim stats.** When a 5v5 result is reported and the screenshot's score agrees with the reported
+score, each human player's line is saved to `scrim_box_scores` (match, team, name, the 13 stats,
+and the league player when the name matched one). This is a separate table from the league's
+`box_scores`, so scrims never touch standings, league stats or awards, and no players are created.
+A score that disagrees is flagged in the reply and saves no lines. 3v3 results, and servers
+without `OPENAI_API_KEY`, save the score and screenshot only. Nothing on the site shows these
+stats yet. Count a row only when its match is `completed`:
+
+```sql
+SELECT b.name, COUNT(*) AS games, SUM(b.pts) AS pts
+FROM scrim_box_scores b JOIN matches m ON m.id = b.match_id
+WHERE m.status = 'completed' GROUP BY b.name ORDER BY pts DESC;
+```
+
+**Testing alone.** One person can't captain two teams, so `/team testopponent [mode] [size]`
+(Manage Server) queues a team that has no members under a made-up captain. Join the queue from
+your own team with the same mode and size: the thread opens, the match card appears, and you can
+accept. Nobody answers for the other side, so the match cancels after 5 minutes and your team goes
+back in line. `/team disband` on the stand-in team cleans it up.
+
+`teams.skill_rating` starts at 1000 and nothing changes it yet. The place to add a rating change
+for ranked results is marked `RATING HOOK` in `confirmResult` in `src/scrim.js`.
+
+Site API (JSON; writes need a Discord login cookie from `GET /api/auth/discord`):
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/me` | The logged-in Discord user, their team, entry and match. |
+| `GET /api/queue` | The live queue. |
+| `POST /api/queue` | Join. Body: `mode`, `team_size`, `minutes`, `skill_min`, `skill_max` (all optional). |
+| `DELETE /api/queue` | Leave. |
+| `GET /api/matches`, `GET /api/matches/:id` | Recent matches with status and result. |
+| `POST /api/matches/accept`, `/decline`, `/confirm`, `/dispute` | Act on your team's current match. |
+| `POST /api/matches/host` | Body: `team_id`. |
+| `POST /api/matches/report` | Body: `score_a`, `score_b`, `image` (a data URL). |
+| `POST /api/admin/matches/:id/confirm` | Commissioner login: confirm any reported result. |
+
+A match made from the site gets its Discord thread on the bot's next 30 second tick. The 5 minute
+accept timeout also runs in the bot, so the bot has to be running for the queue to work fully.
+
 ## Data and backups
 
 - Everything lives in PostgreSQL, including saved screenshots (stored in the `screenshots` table).
@@ -120,6 +260,9 @@ src/league.js          best-of-3 rules, box score validation, saving games
 src/api.js             everything else the pages read and write
 src/auth.js            commissioner login cookie, one-vote-per-browser id
 src/ingest*.js         screenshot reading
+src/scrim.js           scrim queue: join/leave, the matcher, accept, report, confirm
+src/discord-oauth.js   "Log in with Discord" for the site
+bot/                   Discord bot: index.js (startup, routing), boxscore.js (screenshot reading), scrim.js (scrim queue)
 migrations/            schema, applied in order
 db/setup.sql           whole database in one script (generated)
 scripts/               db:setup, db:sql, db:backup

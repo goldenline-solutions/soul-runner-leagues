@@ -3,6 +3,8 @@ import { createAuth, parseCookies } from './auth.js';
 import { UserError } from './league.js';
 import * as api from './api.js';
 import { ingestConfig, ingestScreenshot, readScreenshot } from './ingest.js';
+import * as scrim from './scrim.js';
+import { discordOAuth } from './discord-oauth.js';
 
 export const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
@@ -17,7 +19,7 @@ const id = v => {
   return n;
 };
 
-export function createApp({ db, env = process.env }) {
+export function createApp({ db, env = process.env, fetchImpl = fetch }) {
   const serverless = Boolean(env.VERCEL);
   const auth = createAuth({
     adminPassword: env.ADMIN_PASSWORD,
@@ -27,6 +29,7 @@ export function createApp({ db, env = process.env }) {
     secureCookies: env.COOKIE_SECURE ? env.COOKIE_SECURE === '1' : serverless,
   });
   const ingest = ingestConfig(env);
+  const discord = discordOAuth(env, fetchImpl);
 
   // [method, pattern, handler, options]. Handlers receive ctx and return JSON-able data.
   const routes = [
@@ -80,6 +83,46 @@ export function createApp({ db, env = process.env }) {
     ['GET', /^\/api\/admin\/export$/, () => api.exportAll(db), { admin: true }],
     ['POST', /^\/api\/admin\/ingest$/, ctx => ingestScreenshot(db, ingest, ctx.body), { admin: true, maxBody: 15e6 }],
     ['GET', /^\/api\/screenshots\/(\d+)$/, ctx => readScreenshot(db, id(ctx.params[0]), ctx.admin), { raw: true }],
+
+    // Log in with Discord: the session cookie holds a users.id, which is what makes someone a captain here.
+    ['GET', /^\/api\/auth\/discord$/, ctx => {
+      const { state, cookie } = auth.oauthState();
+      ctx.setCookie(cookie);
+      return discord.authorizeUrl(state);
+    }, { redirect: true }],
+    ['GET', /^\/api\/auth\/discord\/callback$/, async ctx => {
+      if (!auth.stateMatches(ctx.cookies, ctx.query.get('state'))) throw new UserError('That login link expired. Start again.', 400);
+      const profile = await discord.profile(ctx.query.get('code'));
+      const user = await scrim.upsertUser(db, { discordId: profile.id, name: profile.username });
+      ctx.setCookie(auth.userCookie(user.id));
+      return '/';
+    }, { redirect: true }],
+    ['POST', /^\/api\/auth\/logout$/, ctx => {
+      ctx.setCookie(auth.clearUserCookie);
+      return { user: null };
+    }],
+    ['GET', /^\/api\/me$/, async ctx => {
+      const userId = auth.userId(ctx.cookies);
+      const user = userId ? await db.get('SELECT id, discord_id, discord_name FROM users WHERE id = ?', userId) : null;
+      return { user: user ?? null, ...(user ? await scrim.queueStatus(db, user.id) : {}), discord_login: discord.enabled };
+    }],
+
+    // Scrim queue. The same src/scrim.js functions the Discord bot calls; the bot's 30 second tick
+    // opens the match thread for anything matched from here.
+    ['GET', /^\/api\/queue$/, async () => ({ entries: await scrim.listQueue(db) })],
+    ['POST', /^\/api\/queue$/, ctx => scrim.joinQueue(db, ctx.user(), ctx.body)],
+    ['DELETE', /^\/api\/queue$/, ctx => scrim.leaveQueue(db, ctx.user())],
+    ['GET', /^\/api\/matches$/, async () => ({ matches: await scrim.listMatches(db) })],
+    ['GET', /^\/api\/matches\/(\d+)$/, ctx => scrim.matchDetail(db, id(ctx.params[0]))],
+    // These act on the caller's team's current match.
+    ['POST', /^\/api\/matches\/accept$/, ctx => scrim.respondToMatch(db, ctx.user(), true)],
+    ['POST', /^\/api\/matches\/decline$/, ctx => scrim.respondToMatch(db, ctx.user(), false)],
+    ['POST', /^\/api\/matches\/host$/, ctx => scrim.setHost(db, ctx.user(), ctx.body.team_id)],
+    ['POST', /^\/api\/matches\/report$/, ctx => scrim.reportResult(db, ingest, ctx.user(), ctx.body), { maxBody: 15e6 }],
+    ['POST', /^\/api\/matches\/confirm$/, ctx => scrim.confirmResult(db, ctx.user())],
+    ['POST', /^\/api\/matches\/dispute$/, ctx => scrim.disputeMatch(db, ctx.user())],
+    // Commissioner: confirm any reported result.
+    ['POST', /^\/api\/admin\/matches\/(\d+)\/confirm$/, ctx => scrim.confirmResult(db, null, { admin: true, matchId: id(ctx.params[0]) }), { admin: true }],
   ];
 
   async function handle(req, res) {
@@ -118,7 +161,13 @@ export function createApp({ db, env = process.env }) {
     const cookiesOut = [];
     let voter;
     const ctx = {
-      params, body, admin, query: url.searchParams,
+      params, body, admin, cookies, query: url.searchParams,
+      // The users.id of the Discord account logged in on this browser.
+      user: () => {
+        const userId = auth.userId(cookies);
+        if (!userId) throw new UserError('Log in with Discord first.', 401);
+        return userId;
+      },
       // Vercel sets x-real-ip / x-forwarded-for itself, so clients can't spoof them there.
       ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown',
       setCookie: c => cookiesOut.push(c),
@@ -130,6 +179,10 @@ export function createApp({ db, env = process.env }) {
     };
     const result = await handler(ctx);
     if (cookiesOut.length) res.setHeader('Set-Cookie', cookiesOut);
+    if (options.redirect) {
+      res.writeHead(302, { ...SECURITY_HEADERS, Location: result, 'Cache-Control': 'no-store' });
+      return res.end();
+    }
     if (options.raw) {
       res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': result.mime, 'Cache-Control': result.cache || 'private, max-age=3600' });
       return res.end(result.data);

@@ -3,7 +3,7 @@
 // (validate -> extract -> integrity retry -> 3PM back-fill -> duplicate checks), with one change:
 // nothing is saved as a game until the commissioner reviews it in Upload Results.
 import { createHash } from 'node:crypto';
-import { UserError } from './league.js';
+import { UserError, checkSeries } from './league.js';
 import {
   VALIDATION_PROMPT, VALIDATION_SCHEMA, EXTRACTION_PROMPT, BOX_SCORE_SCHEMA, feedbackPrompt, repairPrompt,
 } from './ingest-prompts.js';
@@ -317,6 +317,50 @@ export async function buildDraft(db, data, seriesId) {
   };
 }
 
+// Works out which scheduled matchup a screenshot is from, for callers that can't ask (the Discord
+// bot). Each 2K side must have at least two players from one team's roster, and the two teams must
+// differ. Of the matchups between those teams, the earliest one still being played wins; if every
+// one is decided, the latest is returned with decided: true. Returns null when it can't tell.
+export async function detectSeries(db, data) {
+  const draft = await buildDraft(db, data, null);
+  const rosterTeam = new Map((await db.all('SELECT player_id, team_id FROM roster_slots WHERE player_id IS NOT NULL'))
+    .map(r => [r.player_id, r.team_id]));
+  const top = side2k => {
+    const counts = new Map();
+    for (const l of draft.lines) {
+      const team = l.side2k === side2k && l.match && rosterTeam.get(l.match.player_id);
+      if (team) counts.set(team, (counts.get(team) || 0) + 1);
+    }
+    const [first, second] = [...counts].sort((a, b) => b[1] - a[1]);
+    return first && first[1] >= 2 && first[1] > (second?.[1] ?? 0) ? first[0] : null;
+  };
+  const a = top('AWAY'), h = top('HOME');
+  if (!a || !h || a === h) return null;
+
+  const candidates = await db.all(`SELECT s.id, s.stage, s.label, l.name AS league, w.number AS week, w.date_label,
+      th.name AS home_team, ta.name AS away_team
+    FROM series s JOIN leagues l ON l.id = s.league_id LEFT JOIN weeks w ON w.id = s.week_id
+    JOIN teams th ON th.id = s.home_team_id JOIN teams ta ON ta.id = s.away_team_id
+    WHERE (s.home_team_id = ? AND s.away_team_id = ?) OR (s.home_team_id = ? AND s.away_team_id = ?)
+    ORDER BY w.number NULLS LAST, s.id`, a, h, h, a);
+  let last = null;
+  for (const c of candidates) {
+    const games = await db.all('SELECT game_number, home_score, away_score, forfeit FROM games WHERE series_id = ?', c.id);
+    const wins = checkSeries(games);
+    last = { ...c, next_game_number: games.length + 1, decided: wins.home >= 2 || wins.away >= 2 };
+    if (!last.decided) return last;
+  }
+  return last;
+}
+
+// The draft for a screenshot that was already read, against a matchup (the bot's Save button).
+export async function storedDraft(db, screenshotId, seriesId) {
+  const row = await db.get('SELECT extracted, game_id FROM screenshots WHERE id = ?', screenshotId);
+  if (!row?.extracted) throw new UserError('That reading is gone. Read the screenshot again.', 404);
+  if (row.game_id) throw new UserError('This screenshot is already saved as a game.');
+  return buildDraft(db, JSON.parse(row.extracted), seriesId);
+}
+
 async function duplicateGame(db, draft) {
   const tags = draft.lines.filter(l => l.match).map(l => l.match.player_id).sort((a, b) => a - b).join(',');
   if (!tags) return null;
@@ -329,7 +373,16 @@ async function duplicateGame(db, draft) {
   return null;
 }
 
-export async function ingestScreenshot(db, cfg, { image, series_id: seriesId }) {
+// Stores an image without reading it (scrim results). The same image always gets the same row.
+export async function storeScreenshot(db, image) {
+  const { mime, buffer } = parseDataUrl(image);
+  const sha256 = createHash('sha256').update(buffer).digest('hex');
+  await db.run('INSERT INTO screenshots (sha256, mime, image) VALUES (?, ?, ?) ON CONFLICT (sha256) DO NOTHING', sha256, mime, buffer);
+  return (await db.get('SELECT id FROM screenshots WHERE sha256 = ?', sha256)).id;
+}
+
+// detect_series: when no series_id is given, work the matchup out from the players (detectSeries).
+export async function ingestScreenshot(db, cfg, { image, series_id: seriesId, detect_series: detect = false }) {
   const { mime, buffer } = parseDataUrl(image);
   const sha256 = createHash('sha256').update(buffer).digest('hex');
   const known = await db.get('SELECT id, game_id, extracted, warnings FROM screenshots WHERE sha256 = ?', sha256);
@@ -376,8 +429,11 @@ export async function ingestScreenshot(db, cfg, { image, series_id: seriesId }) 
   }
 
   const screenshot = await db.get('SELECT id FROM screenshots WHERE sha256 = ?', sha256);
-  const sid = Number(seriesId);
-  const draft = await buildDraft(db, data, Number.isInteger(sid) && sid > 0 && sid < 2 ** 31 ? sid : null);
+  const given = Number(seriesId);
+  let sid = Number.isInteger(given) && given > 0 && given < 2 ** 31 ? given : null;
+  const series = !sid && detect ? await detectSeries(db, data) : null;
+  if (series) sid = series.id;
+  const draft = await buildDraft(db, data, sid);
   const dup = await duplicateGame(db, draft);
   if (dup) draft.warnings.unshift('Duplicate game found: same players with the same scores are already recorded.');
   return {
@@ -385,14 +441,17 @@ export async function ingestScreenshot(db, cfg, { image, series_id: seriesId }) 
     cached: stored?.extraction_version === EXTRACTION_VERSION,
     duplicate_game_id: dup,
     quarters: data.game.quarters,
+    ...(detect ? { series } : {}),
     ...draft,
     warnings: [...warnings, ...draft.warnings],
   };
 }
 
-// Screenshots are public once attached to a saved game (proof for the box score); drafts are admin-only.
+// Screenshots are public once attached to a saved game or a scrim result (proof for the score); drafts are admin-only.
 export async function readScreenshot(db, id, admin) {
-  const row = await db.get('SELECT mime, image, game_id FROM screenshots WHERE id = ?', id);
-  if (!row || (!row.game_id && !admin)) throw new UserError('Screenshot not found.', 404);
+  const row = await db.get(`SELECT mime, image, game_id,
+    EXISTS (SELECT 1 FROM match_results r WHERE r.screenshot_id = screenshots.id) AS scrim
+    FROM screenshots WHERE id = ?`, id);
+  if (!row || (!row.game_id && !row.scrim && !admin)) throw new UserError('Screenshot not found.', 404);
   return { mime: row.mime, data: Buffer.from(row.image) };
 }

@@ -3,6 +3,8 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypt
 const SESSION_DAYS = 14;
 const ADMIN_COOKIE = 'sr_admin';
 const VOTER_COOKIE = 'sr_voter';
+const USER_COOKIE = 'sr_user';
+const STATE_COOKIE = 'sr_oauth';
 
 export function createAuth({ adminPassword, sessionSecret, secureCookies, requireSecret = false }) {
   const secret = sessionSecret || randomBytes(32).toString('hex');
@@ -38,7 +40,30 @@ export function createAuth({ adminPassword, sessionSecret, secureCookies, requir
     return { id: fresh, cookie: `${VOTER_COOKIE}=${fresh}.${sign(fresh)}; ${attrs}; Max-Age=${400 * 86400}` };
   }
 
+  // Discord login (src/discord-oauth.js): a signed cookie holding the users.id.
+  function userCookie(userId) {
+    const body = `${userId}.${Date.now() + SESSION_DAYS * 864e5}`;
+    return `${USER_COOKIE}=${body}.${sign(`user.${body}`)}; ${attrs}; Max-Age=${SESSION_DAYS * 86400}`;
+  }
+
+  function userId(cookies) {
+    const [id, expires, sig] = (cookies[USER_COOKIE] || '').split('.');
+    if (!id || !sig || Number(expires) < Date.now() || sig !== sign(`user.${id}.${expires}`)) return null;
+    return Number(id);
+  }
+
+  // The random `state` sent to Discord and checked when it sends the browser back.
+  function oauthState() {
+    const state = randomBytes(16).toString('hex');
+    return { state, cookie: `${STATE_COOKIE}=${state}; ${attrs}; Max-Age=600` };
+  }
+
   return {
+    userCookie,
+    userId,
+    clearUserCookie: `${USER_COOKIE}=; ${attrs}; Max-Age=0`,
+    oauthState,
+    stateMatches: (cookies, state) => Boolean(state) && cookies[STATE_COOKIE] === state,
     enabled: Boolean(adminPassword) && (Boolean(sessionSecret) || !requireSecret),
     passwordMatches,
     sessionCookie,
