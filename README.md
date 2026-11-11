@@ -233,6 +233,62 @@ Site API (JSON; writes need a Discord login cookie from `GET /api/auth/discord`)
 A match made from the site gets its Discord thread on the bot's next 30 second tick. The 5 minute
 accept timeout also runs in the bot, so the bot has to be running for the queue to work fully.
 
+## Solo queue
+
+Players without a team queue alone and get placed by position. Separate from the scrim queue:
+its own tables (`solo_queue_entries`, `solo_matches`), its own channel, its own `/solo` command.
+Discord only; the site has no solo endpoints, because positions come from Discord roles.
+
+**Setup**
+
+1. Create five roles in the server named exactly `PG`, `SG`, `LOCK`, `BACKEND` and `C` (case does
+   not matter). A player's positions are the ones of these roles they hold; they can hold several.
+2. Set `SOLO_QUEUE_CHANNEL_ID` in `.env` to the channel for the pinned live message and the private
+   match threads. Use a different channel from `SCRIM_QUEUE_CHANNEL_ID`.
+3. Restart the bot.
+
+| Command | Who | What |
+| --- | --- | --- |
+| `/solo join [minutes_available]` | Anyone with a position role | Join the line. Also the **Join Solo Queue** button. |
+| `/solo leave`, `/solo status` | Players | Leave, or see your place or your match. |
+| `/solo accept`, `/solo decline` | Players in a match | Also buttons on the match card. |
+| `/solo report winner screenshot` | Any of the ten | Ends the game; score and stats are read from the screenshot. Also the **Team A won** / **Team B won** buttons. No second confirmation. |
+| `/solo cancel` | Manage Server | Run in a match thread to call that match off. |
+| `/solo testfill` | Manage Server | Testing: adds 9 fake players that never accept. |
+
+**How a game forms** (`seatGame` and `runMatcher` in `src/solo.js`)
+
+1. The matcher runs on every join and every 30 seconds. It walks the line, longest wait first, and
+   fills ten seats: two per position. A seated player can be moved to another position they play
+   to make room for someone, but is never pushed out of the game.
+2. When all ten seats fill, the first player found for a position is on Team A, the second on
+   Team B. The ten get a private thread with the rosters and Accept / Decline buttons.
+3. All ten accept within 5 minutes: the game is on. A decline cancels it and puts the other nine
+   back in line. A timeout puts the players who accepted back in line and drops the rest.
+4. The thread gets a result card with **Team A won** and **Team B won** buttons. Anyone in the game
+   presses the right one and uploads the final box score screenshot; nobody types a score. A game
+   with no report is closed after 3 hours, so the players can queue again. The thread is archived
+   24 hours after the result.
+
+**Solo results and stats.** The score and each human player's line are read from the screenshot by
+the same reader as league games, so reporting needs `OPENAI_API_KEY`. A screenshot names no teams,
+which is why the reporter says who won: the side with the higher score is that team. The score goes
+on `solo_matches`, the lines into `solo_box_scores` with `side` A or B. A screenshot that can't be
+read is refused and the game stays open for another upload. Nothing is written to `box_scores`,
+`players` or `scrim_box_scores`, and nothing shows on the site yet. Rows hold the name as read from
+the screenshot, not the Discord account, because nothing links gamertags to Discord users yet.
+
+```sql
+SELECT name, COUNT(*) AS games, SUM(pts) AS pts, SUM(reb) AS reb, SUM(ast) AS ast
+FROM solo_box_scores GROUP BY name ORDER BY pts DESC;
+```
+
+Teams are not balanced by skill: there are no player ratings yet. The place to do it is marked
+`BALANCE HOOK` in `runMatcher`.
+
+**Testing alone:** give yourself a position role, run `/solo testfill`, then `/solo join`. The
+thread and match card appear within 30 seconds; the match cancels 5 minutes later.
+
 ## Data and backups
 
 - Everything lives in PostgreSQL, including saved screenshots (stored in the `screenshots` table).
@@ -261,8 +317,9 @@ src/api.js             everything else the pages read and write
 src/auth.js            commissioner login cookie, one-vote-per-browser id
 src/ingest*.js         screenshot reading
 src/scrim.js           scrim queue: join/leave, the matcher, accept, report, confirm
+src/solo.js            solo queue: position seating, accept, report
 src/discord-oauth.js   "Log in with Discord" for the site
-bot/                   Discord bot: index.js (startup, routing), boxscore.js (screenshot reading), scrim.js (scrim queue)
+bot/                   Discord bot: index.js (startup, routing), boxscore.js (screenshot reading), scrim.js (scrim queue), solo.js (solo queue)
 migrations/            schema, applied in order
 db/setup.sql           whole database in one script (generated)
 scripts/               db:setup, db:sql, db:backup
