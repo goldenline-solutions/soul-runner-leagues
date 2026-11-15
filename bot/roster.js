@@ -10,6 +10,7 @@
 import { UserError } from '../src/league.js';
 import { ROSTER_SLOTS } from '../src/seed.js';
 import * as roster from '../src/roster.js';
+import { POSITIONS, positionsFromRoles } from '../src/solo.js';
 
 const EPHEMERAL = 64;
 const MANAGE_GUILD = 32n;
@@ -75,23 +76,27 @@ async function applyRoles(i, ctx, discordId, { add, remove, freeAgent, owner, ca
 
 // Everyone holding the free agent role in Discord joins the pool, so the role and the pool agree
 // however the role was given. Members on a roster are skipped (sync takes the role off them).
-// Returns { note, names }: a note for the reply when the role holders could not be read, and
-// each member's server profile name (nickname) by Discord id, for showing the list.
+// Returns { note, names, positions }: a note for the reply when the role holders could not be
+// read, and by Discord id each member's server profile name (nickname) and the position roles
+// they hold (PG, SG, LOCK, BACKEND, C: the same roles the solo queue reads).
 async function adoptRoleHolders(i, ctx) {
-  const names = new Map();
-  if (!ctx.freeAgentRoleId) return { names, note: 'No free agent role is set, so only the pool is shown. Run `/roster autoroles`, or set `FREE_AGENT_ROLE_ID`.' };
+  const names = new Map(), positions = new Map();
+  if (!ctx.freeAgentRoleId) return { names, positions, note: 'No free agent role is set, so only the pool is shown. Run `/roster autoroles`, or set `FREE_AGENT_ROLE_ID`.' };
   const holders = [];
   try {
     for (let after; ;) { // the member list comes 1000 at a time
       const page = [...(await i.guild.members.list({ limit: 1000, after })).values()];
-      for (const m of page) names.set(m.user.id, m.displayName ?? m.nickname ?? m.user.globalName ?? m.user.username);
+      for (const m of page) {
+        names.set(m.user.id, m.displayName ?? m.nickname ?? m.user.globalName ?? m.user.username);
+        positions.set(m.user.id, positionsFromRoles([...m.roles.cache.values()].map(r => r.name)));
+      }
       holders.push(...page.filter(m => !m.user.bot && m.roles.cache.has(ctx.freeAgentRoleId)));
       if (page.length < 1000) break;
       after = page.at(-1).user.id;
     }
   } catch (err) {
     return {
-      names: new Map(),
+      names: new Map(), positions: new Map(),
       note: `Could not read who holds <@&${ctx.freeAgentRoleId}> (${err.message}), so only the pool is shown. `
         + 'Turn on **Server Members Intent** for the bot: Discord Developer Portal → your app → Bot → Privileged Gateway Intents.',
     };
@@ -106,7 +111,7 @@ async function adoptRoleHolders(i, ctx) {
     await roster.addFreeAgent(ctx.db, { member: { id: m.user.id, name: m.user.username }, by: i.user.id })
       .catch(err => { if (!(err instanceof UserError)) throw err; }); // on a roster, or their name belongs to another record
   }
-  return { names, note: '' };
+  return { names, positions, note: '' };
 }
 
 const withWarnings = (text, warnings) => (warnings.length
@@ -143,12 +148,23 @@ const ACTIONS = {
   },
   freeagents: async (i, ctx) => {
     await i.deferReply({ flags: EPHEMERAL });
-    const { note, names } = await adoptRoleHolders(i, ctx);
+    const { note, names, positions } = await adoptRoleHolders(i, ctx);
     const list = await roster.freeAgents(ctx.db);
-    const body = list.length
-      ? `**Free agents (${list.length})**\n${list.slice(0, 40).map(p => `• ${who(p, names)}`).join('\n')}${list.length > 40 ? `\n…and ${list.length - 40} more` : ''}`
-      : 'There are no free agents.';
-    await i.editReply({ content: `${body}${note ? `\n\n${note}` : ''}`.slice(0, 1900), allowedMentions: { parse: [] } });
+    if (!list.length) return i.editReply({ content: `There are no free agents.${note ? `\n\n${note}` : ''}`, allowedMentions: { parse: [] } });
+
+    // One group per position role. Someone with several position roles is listed under each.
+    const group = (title, people) => `**${title}:**\n${people.slice(0, 30).map(p => who(p, names)).join('\n') || '-'}`
+      + (people.length > 30 ? `\n…and ${people.length - 30} more` : '');
+    const plays = (p, position) => (positions.get(p.discord_id) ?? []).includes(position);
+    const unplaced = list.filter(p => !(positions.get(p.discord_id) ?? []).length);
+    const groups = positions.size
+      ? [...POSITIONS.map(position => group(position, list.filter(p => plays(p, position)))),
+        ...(unplaced.length ? [group('No position role', unplaced)] : [])]
+      : [list.slice(0, 60).map(p => who(p, names)).join('\n')]; // the member list could not be read: no positions known
+    await i.editReply({
+      embeds: [{ title: `Free agents (${list.length})`, description: groups.join('\n\n').slice(0, 4000) }],
+      content: note, allowedMentions: { parse: [] },
+    });
   },
   sign: async (i, ctx) => {
     // Holding the free agent role counts as being a free agent, even if nobody ran /roster freeagent.

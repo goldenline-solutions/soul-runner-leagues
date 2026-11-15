@@ -7,7 +7,10 @@ import rosterBot from '../bot/roster.js';
 
 // `name` is the account username; the server profile name is "<Name> | SR".
 const nick = name => `${name[0].toUpperCase()}${name.slice(1)} | SR`;
-const guildMember = (id, name, roles, bot = false) => ({ user: { id, username: name, bot }, displayName: nick(name), roles: { cache: new Set(roles) } });
+// Roles are given by name; a role's id is its name, as far as this fake server goes.
+const guildMember = (id, name, roles, bot = false) => ({
+  user: { id, username: name, bot }, displayName: nick(name), roles: { cache: new Map(roles.map(r => [r, { name: r }])) },
+});
 
 async function setup(list) {
   const db = await connectLocal();
@@ -18,7 +21,7 @@ async function setup(list) {
       guild, user: { id: '900', username: 'viewer' }, memberPermissions: { has: () => false }, member: { roles: { cache: new Set() } },
       isAutocomplete: () => false, options: { getSubcommand: () => sub, getString: () => null },
       deferReply: async function defer() { this.deferred = true; },
-      editReply: async p => { said.push(p.content); },
+      editReply: async p => { said.push([p.embeds?.[0]?.title, p.embeds?.[0]?.description, p.content].filter(Boolean).join('\n')); },
       reply: async p => { said.push(p.content); },
     }, { db, freeAgentRoleId: 'fa-role' });
     return said.join('\n');
@@ -28,8 +31,9 @@ async function setup(list) {
 
 test('members holding the free agent role are listed, even though nobody ran /roster freeagent', async () => {
   const members = [
-    guildMember('111', 'ann', ['fa-role']),
-    guildMember('222', 'bob', ['fa-role', 'other']),
+    guildMember('111', 'ann', ['fa-role', 'PG', 'sg']),   // two positions: listed under both
+    guildMember('222', 'bob', ['fa-role', 'C', 'other']),
+    guildMember('666', 'eve', ['fa-role']),               // no position role
     guildMember('333', 'cy', ['other']),            // no free agent role
     guildMember('444', 'helper-bot', ['fa-role'], true), // a bot
     guildMember('555', 'dee', ['fa-role']),         // holds the role but is on a roster
@@ -39,16 +43,23 @@ test('members holding the free agent role are listed, even though nobody ran /ro
   await roster.sign(db, { teamId: team.id, member: { id: '555', name: 'dee' } });
 
   const reply = await run('freeagents'); // anyone can run it
-  assert.match(reply, /^\*\*Free agents \(2\)\*\*/);
-  // Server profile names, not usernames and not mentions.
-  assert.equal(reply, '**Free agents (2)**\n• Ann | SR\n• Bob | SR');
+  // Grouped by position role, with server profile names (not usernames, not mentions).
+  assert.equal(reply, [
+    'Free agents (3)',
+    '**PG:**\nAnn | SR', '',
+    '**SG:**\nAnn | SR', '',
+    '**LOCK:**\n-', '',
+    '**BACKEND:**\n-', '',
+    '**C:**\nBob | SR', '',
+    '**No position role:**\nEve | SR',
+  ].join('\n'));
   assert.ok(!reply.includes('Cy | SR') && !reply.includes('Helper-bot') && !reply.includes('Dee | SR'));
-  assert.match(await run('freeagents'), /^\*\*Free agents \(2\)\*\*/); // running it again adds nobody twice
+  assert.match(await run('freeagents'), /^Free agents \(3\)/); // running it again adds nobody twice
 
   // bob leaves the server: he drops out of the pool instead of showing as an unknown user.
   members.splice(1, 1);
   const after = await run('freeagents');
-  assert.match(after, /^\*\*Free agents \(1\)\*\*/);
+  assert.match(after, /^Free agents \(2\)/);
   assert.ok(!after.includes('Bob'));
 
   // A commissioner can also take someone out by hand.

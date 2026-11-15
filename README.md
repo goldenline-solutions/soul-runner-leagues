@@ -289,7 +289,7 @@ apply on top of it.
 | Command | Who | What |
 | --- | --- | --- |
 | `/roster view team` | Anyone | Owner, captain, and the seven slots. |
-| `/roster freeagents` | Anyone | The free agent pool. |
+| `/roster freeagents` | Anyone | The free agent pool, grouped by position role (`PG`, `SG`, `LOCK`, `BACKEND`, `C`: the solo queue's roles). A player with several position roles is listed under each; names are server profile names. |
 | `/roster sign team user [slot]` | Commissioner; owner or captain (free agents, own team) | Signs into the slot given, or the first empty one. Adds the team role, removes the free agent role. |
 | `/roster release user [team]` | Commissioner; owner or captain (own team) | Frees the slot and removes the team role. With no team left, the player becomes a free agent. |
 | `/roster move user team [slot]` | Commissioner; owner or captain (slot change only) | Changes teams inside a league in one step (roles swap), or changes slot on the same team. |

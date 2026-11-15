@@ -133,7 +133,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
     members: {
       addRole: async ({ user, role }) => { if (role === 'broken') throw new Error('Missing Permissions'); calls.push(`+${role}`); (held[user] ??= new Set()).add(role); },
       removeRole: async ({ user, role }) => { calls.push(`-${role}`); held[user]?.delete(role); },
-      list: async () => new Map(Object.entries(held).map(([id, roles]) => [id, { user: { id, username: 'ann', bot: false }, roles: { cache: { has: r => roles.has(r) } } }])),
+      list: async () => new Map(Object.entries(held).map(([id, roles]) => [id, { user: { id, username: 'ann', bot: false }, roles: { cache: { has: r => roles.has(r), values: () => [] } } }])),
       fetch: async id => (held[id] ? { roles: { cache: { has: r => held[id].has(r) } } } : Promise.reject(new Error('Unknown Member'))),
     },
   };
@@ -148,7 +148,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
         getRole: () => ({ id: options.role }),
       },
       deferReply: async function defer() { this.deferred = true; },
-      editReply: async p => { said.push(p.content); },
+      editReply: async p => { said.push([p.embeds?.[0]?.title, p.embeds?.[0]?.description, p.content].filter(Boolean).join('\n')); },
       reply: async p => { said.push(p.content); },
     }, ctx);
     return said.join('\n');
@@ -171,7 +171,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
 
   assert.match(await run('release', { user }), /released by .* and is now a free agent/);
   assert.deepEqual(calls.splice(0), ['-role-b', '+fa-role']);
-  assert.match(await run('freeagents', {}, false), /Free agents \(1\)\*\*\n• ann/);
+  assert.match(await run('freeagents', {}, false), /Free agents \(1\)\n[\s\S]*No position role:\*\*\nann/);
 
   // A role the bot can't give: the signing stands, with a warning.
   await run('setrole', { team: String(a.id), role: 'broken' });
