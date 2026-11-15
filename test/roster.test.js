@@ -133,7 +133,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
     members: {
       addRole: async ({ user, role }) => { if (role === 'broken') throw new Error('Missing Permissions'); calls.push(`+${role}`); (held[user] ??= new Set()).add(role); },
       removeRole: async ({ user, role }) => { calls.push(`-${role}`); held[user]?.delete(role); },
-      list: async () => new Map(), // nobody else in the server holds the free agent role
+      list: async () => new Map(Object.entries(held).map(([id, roles]) => [id, { user: { id, username: 'ann', bot: false }, roles: { cache: { has: r => roles.has(r) } } }])),
       fetch: async id => (held[id] ? { roles: { cache: { has: r => held[id].has(r) } } } : Promise.reject(new Error('Unknown Member'))),
     },
   };
@@ -171,7 +171,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
 
   assert.match(await run('release', { user }), /released by .* and is now a free agent/);
   assert.deepEqual(calls.splice(0), ['-role-b', '+fa-role']);
-  assert.match(await run('freeagents', {}, false), /Free agents \(1\)\*\*\n• <@111>/);
+  assert.match(await run('freeagents', {}, false), /Free agents \(1\)\*\*\n• ann/);
 
   // A role the bot can't give: the signing stands, with a warning.
   await run('setrole', { team: String(a.id), role: 'broken' });
@@ -194,7 +194,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
   await run('release', { user });
   await db.run('UPDATE players SET free_agent = false');
   calls.splice(0);
-  assert.match(await run('sync'), /Roles fixed for 0\. Added 1 to the free agent pool/);
+  assert.match(await run('sync'), /Roles fixed for 0\./);
   assert.deepEqual(calls, []);
   assert.deepEqual((await roster.freeAgents(db)).map(p => p.tag), ['ann']);
 });

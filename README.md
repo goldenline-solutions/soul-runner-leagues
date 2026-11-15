@@ -279,7 +279,12 @@ free agent role by hand is enough for a captain to sign them. `/roster freeagent
 `/roster sync` first add everyone holding the role to the pool, so the list matches Discord.
 Reading who holds a role needs **Server Members Intent** turned on for the bot (Discord Developer
 Portal -> your app -> Bot -> Privileged Gateway Intents); without it the reply says so and shows
-the pool only.
+the pool only. The same pass drops free agents who have left the server.
+
+**Who can run `/roster` at all** is also yours to set in Discord: Server Settings -> Integrations
+-> the bot -> `/roster` lets you limit the command to certain roles or channels. That switch
+covers the whole `/roster` command, not single subcommands, and the bot's own rules above still
+apply on top of it.
 
 | Command | Who | What |
 | --- | --- | --- |
@@ -289,7 +294,7 @@ the pool only.
 | `/roster release user [team]` | Commissioner; owner or captain (own team) | Frees the slot and removes the team role. With no team left, the player becomes a free agent. |
 | `/roster move user team [slot]` | Commissioner; owner or captain (slot change only) | Changes teams inside a league in one step (roles swap), or changes slot on the same team. |
 | `/roster staff team user position` | Commissioner | Makes a member an `owner` or `captain` of a team, or `remove`s them. Gives the team role and the Owner or Captain role. |
-| `/roster freeagent user` | Commissioner | Puts a member with no team in the pool and gives the free agent role. |
+| `/roster freeagent user [action]` | Commissioner | Puts a member with no team in the pool and gives the free agent role. `action: remove` takes them out. |
 | `/roster link user player` | Commissioner | Connects a member to a player record that already exists, so stats and roster spot stay with them. |
 | `/roster autoroles` | Commissioner | Scans the server's roles and sets team roles and the commissioner, free agent, owner and captain roles by name. |
 | `/roster setrole team role` | Commissioner | The role a team's players get, set by hand. |

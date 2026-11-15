@@ -378,7 +378,14 @@ CREATE TABLE team_staff (
 );
 CREATE INDEX team_staff_member ON team_staff (discord_id);
 
-INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql');
+-- ===== 0010_free_agent_removed.sql =====
+-- roster_moves also records someone being taken out of the free agent pool without a signing
+-- (/roster freeagent remove, or a member who left the server).
+ALTER TABLE roster_moves DROP CONSTRAINT roster_moves_action_check;
+ALTER TABLE roster_moves ADD CONSTRAINT roster_moves_action_check
+  CHECK (action IN ('sign', 'release', 'move', 'free_agent', 'free_agent_removed'));
+
+INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql'), ('0010_free_agent_removed.sql');
 
 -- ===== Season 1 data =====
 INSERT INTO leagues (id, name, season_name, blurb, sort) VALUES

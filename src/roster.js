@@ -162,6 +162,14 @@ export async function addFreeAgent(db, { member, by }) {
   });
 }
 
+// Takes someone out of the free agent pool without signing them (they left, or stopped looking).
+export async function removeFreeAgent(db, { discordId, by }) {
+  const player = await db.get('UPDATE players SET free_agent = false WHERE discord_id = ? AND free_agent RETURNING *', String(discordId));
+  if (!player) throw new UserError('That member is not in the free agent pool.', 404);
+  await db.run("INSERT INTO roster_moves (player_id, action, by_discord_id) VALUES (?, 'free_agent_removed', ?)", player.id, by ?? null);
+  return { player, roles: { add: [], remove: [], freeAgent: false } };
+}
+
 export const freeAgents = db => db.all(`SELECT p.id, p.discord_tag AS tag, p.discord_id,
     (SELECT MAX(m.created_at) FROM roster_moves m WHERE m.player_id = p.id) AS since
   FROM players p WHERE p.free_agent ORDER BY since NULLS LAST, lower(p.discord_tag)`);

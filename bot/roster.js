@@ -31,7 +31,9 @@ export const commands = [{
       type: 3, name: 'position', description: 'Their position on the team', required: true,
       choices: [{ name: 'owner', value: 'owner' }, { name: 'captain', value: 'captain' }, { name: 'remove', value: 'remove' }],
     }]),
-    sub('freeagent', 'Commissioners: put a member with no team in the free agent pool', [USER]),
+    sub('freeagent', 'Commissioners: put a member with no team in the free agent pool, or take them out', [USER, {
+      type: 3, name: 'action', description: 'add (default) or remove', choices: [{ name: 'add', value: 'add' }, { name: 'remove', value: 'remove' }],
+    }]),
     sub('link', 'Commissioners: connect a member to a player record that already exists', [
       USER, { type: 3, name: 'player', description: 'Player record (not linked yet)', required: true, autocomplete: true },
     ]),
@@ -73,27 +75,38 @@ async function applyRoles(i, ctx, discordId, { add, remove, freeAgent, owner, ca
 
 // Everyone holding the free agent role in Discord joins the pool, so the role and the pool agree
 // however the role was given. Members on a roster are skipped (sync takes the role off them).
-// Returns a note for the reply when the role holders could not be read, else ''.
+// Returns { note, names }: a note for the reply when the role holders could not be read, and
+// each member's server profile name (nickname) by Discord id, for showing the list.
 async function adoptRoleHolders(i, ctx) {
-  if (!ctx.freeAgentRoleId) return 'No free agent role is set, so only the pool is shown. Run `/roster autoroles`, or set `FREE_AGENT_ROLE_ID`.';
+  const names = new Map();
+  if (!ctx.freeAgentRoleId) return { names, note: 'No free agent role is set, so only the pool is shown. Run `/roster autoroles`, or set `FREE_AGENT_ROLE_ID`.' };
   const holders = [];
   try {
     for (let after; ;) { // the member list comes 1000 at a time
       const page = [...(await i.guild.members.list({ limit: 1000, after })).values()];
+      for (const m of page) names.set(m.user.id, m.displayName ?? m.nickname ?? m.user.globalName ?? m.user.username);
       holders.push(...page.filter(m => !m.user.bot && m.roles.cache.has(ctx.freeAgentRoleId)));
       if (page.length < 1000) break;
       after = page.at(-1).user.id;
     }
   } catch (err) {
-    return `Could not read who holds <@&${ctx.freeAgentRoleId}> (${err.message}), so only the pool is shown. `
-      + 'Turn on **Server Members Intent** for the bot: Discord Developer Portal → your app → Bot → Privileged Gateway Intents.';
+    return {
+      names: new Map(),
+      note: `Could not read who holds <@&${ctx.freeAgentRoleId}> (${err.message}), so only the pool is shown. `
+        + 'Turn on **Server Members Intent** for the bot: Discord Developer Portal → your app → Bot → Privileged Gateway Intents.',
+    };
   }
-  const inPool = new Set((await roster.freeAgents(ctx.db)).map(p => p.discord_id));
+  const pool = await roster.freeAgents(ctx.db);
+  // Free agents who left the server come out of the pool (Discord shows them as "unknown user").
+  for (const p of pool.filter(x => x.discord_id && !names.has(x.discord_id))) {
+    await roster.removeFreeAgent(ctx.db, { discordId: p.discord_id, by: i.user.id });
+  }
+  const inPool = new Set(pool.map(p => p.discord_id));
   for (const m of holders.filter(h => !inPool.has(h.user.id))) {
     await roster.addFreeAgent(ctx.db, { member: { id: m.user.id, name: m.user.username }, by: i.user.id })
       .catch(err => { if (!(err instanceof UserError)) throw err; }); // on a roster, or their name belongs to another record
   }
-  return '';
+  return { names, note: '' };
 }
 
 const withWarnings = (text, warnings) => (warnings.length
@@ -109,7 +122,9 @@ const member = i => {
   const u = i.options.getUser('user');
   return { id: u.id, name: u.username };
 };
-const who = p => (p.discord_id ? `<@${p.discord_id}>` : p.tag);
+// A free agent as shown in the list: their server profile name (the nickname they use in this
+// server), never their account username. Without the member list, the mention has to do.
+const who = (p, names) => names.get(p.discord_id) ?? (p.discord_id ? `<@${p.discord_id}>` : p.tag);
 
 const ACTIONS = {
   view: async (i, { db }) => {
@@ -128,10 +143,10 @@ const ACTIONS = {
   },
   freeagents: async (i, ctx) => {
     await i.deferReply({ flags: EPHEMERAL });
-    const note = await adoptRoleHolders(i, ctx);
+    const { note, names } = await adoptRoleHolders(i, ctx);
     const list = await roster.freeAgents(ctx.db);
     const body = list.length
-      ? `**Free agents (${list.length})**\n${list.slice(0, 40).map(p => `• ${who(p)}`).join('\n')}${list.length > 40 ? `\n…and ${list.length - 40} more` : ''}`
+      ? `**Free agents (${list.length})**\n${list.slice(0, 40).map(p => `• ${who(p, names)}`).join('\n')}${list.length > 40 ? `\n…and ${list.length - 40} more` : ''}`
       : 'There are no free agents.';
     await i.editReply({ content: `${body}${note ? `\n\n${note}` : ''}`.slice(0, 1900), allowedMentions: { parse: [] } });
   },
@@ -157,8 +172,11 @@ const ACTIONS = {
   },
   freeagent: async (i, ctx) => {
     const m = member(i);
-    const r = await roster.addFreeAgent(ctx.db, { member: m, by: i.user.id });
-    await loud(i, withWarnings(`<@${m.id}> is now a free agent.`, await applyRoles(i, ctx, m.id, r.roles)));
+    const remove = i.options.getString('action') === 'remove';
+    const r = remove
+      ? await roster.removeFreeAgent(ctx.db, { discordId: m.id, by: i.user.id })
+      : await roster.addFreeAgent(ctx.db, { member: m, by: i.user.id });
+    await loud(i, withWarnings(`<@${m.id}> is ${remove ? 'no longer' : 'now'} a free agent.`, await applyRoles(i, ctx, m.id, r.roles)));
   },
   link: async (i, ctx) => {
     const m = member(i);
@@ -196,7 +214,7 @@ const ACTIONS = {
   },
   sync: async (i, ctx) => {
     await i.deferReply({ flags: EPHEMERAL });
-    const note = await adoptRoleHolders(i, ctx);
+    const { note } = await adoptRoleHolders(i, ctx);
     const { teamRoleIds, members, problems } = await roster.audit(ctx.db);
     if (note && ctx.freeAgentRoleId) problems.push(note);
     // The server-wide roles this bot hands out, next to the team roles.
