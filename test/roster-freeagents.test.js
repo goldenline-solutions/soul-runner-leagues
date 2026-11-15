@@ -48,8 +48,8 @@ test('members holding the free agent role are listed, even though nobody ran /ro
     'Free agents (3)',
     '**PG:**\nAnn | SR', '',
     '**SG:**\nAnn | SR', '',
-    '**LOCK:**\n-', '',
-    '**BACKEND:**\n-', '',
+    '**SF:**\n-', '',
+    '**PF:**\n-', '',
     '**C:**\nBob | SR', '',
     '**No position role:**\nEve | SR',
   ].join('\n'));

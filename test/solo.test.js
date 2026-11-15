@@ -34,14 +34,14 @@ test('seatGame moves a flexible player to another position to make room', () => 
   // Players 1 and 2 can play PG or C and take PG first. Players 9 and 10 can only play PG,
   // so 1 and 2 are moved to C instead of 9 and 10 being left out.
   const seats = seatsOf(solo.seatGame(entries([
-    ['PG', 'C'], ['PG', 'C'], ['SG'], ['SG'], ['LOCK'], ['LOCK'], ['BACKEND'], ['BACKEND'], ['PG'], ['PG'],
+    ['PG', 'C'], ['PG', 'C'], ['SG'], ['SG'], ['SF'], ['SF'], ['PF'], ['PF'], ['PG'], ['PG'],
   ])));
   assert.deepEqual([seats['C-A'], seats['C-B']].sort(), [1, 2]);
   assert.deepEqual([seats['PG-A'], seats['PG-B']].sort((a, b) => a - b), [9, 10]);
 });
 
 test('seatGame waits when a position is short, and seats the longest waiting first', () => {
-  const noCenter = [...Array(12)].map(() => ['PG', 'SG', 'LOCK', 'BACKEND']);
+  const noCenter = [...Array(12)].map(() => ['PG', 'SG', 'SF', 'PF']);
   assert.equal(solo.seatGame(entries(noCenter)), null);
 
   // Three centers are waiting: the first two get the seats, the third keeps waiting.
@@ -82,8 +82,8 @@ test('ten players are matched, all accept, and can queue again once the game is 
 test('joining needs a position role', async () => {
   const db = await connectLocal();
   const user = await upsertUser(db, { discordId: 'norole' });
-  await assert.rejects(solo.joinQueue(db, user.id, { positions: [] }), /position role first: PG, SG, LOCK, BACKEND, C/);
-  assert.deepEqual(solo.positionsFromRoles(['Member', 'lock', ' C ', 'Captain']), ['LOCK', 'C']);
+  await assert.rejects(solo.joinQueue(db, user.id, { positions: [] }), /position role first: PG, SG, SF, PF, C/);
+  assert.deepEqual(solo.positionsFromRoles(['Member', 'sf', ' C ', 'Captain', 'LOCK']), ['SF', 'C']);
 });
 
 test('a timeout puts the players who accepted back in line; a decline puts everyone else back', async () => {
@@ -151,10 +151,10 @@ test('/solo in Discord: positions come from roles, testfill completes a game for
   assert.match(await run('me', 'join', { roles: ['Member'] }), /position role first/);
   assert.match(await run('me', 'testfill'), /Only a commissioner/);
   assert.match(await run('commish', 'testfill', { admin: true }), /^9 fake players/);
-  assert.match(live.at(-1).embeds[0].description, /Test player 1 · PG \/ SG \/ LOCK \/ BACKEND \/ C/);
-  assert.equal(live.at(-1).embeds[0].fields[0].value, 'PG 9 · SG 9 · LOCK 9 · BACKEND 9 · C 9');
+  assert.match(live.at(-1).embeds[0].description, /Test player 1 · PG \/ SG \/ SF \/ PF \/ C/);
+  assert.equal(live.at(-1).embeds[0].fields[0].value, 'PG 9 · SG 9 · SF 9 · PF 9 · C 9');
 
-  // The Join button, with a C and an SG role. Nine fakes took PG..BACKEND twice and one C, so the real player is C.
+  // The Join button, with a C and an SG role. Nine fakes took PG..PF twice and one C, so the real player is C.
   assert.match(await run('me', 'join', { roles: ['c', 'SG'], button: true }), /Game found/);
   assert.deepEqual(added, ['me']); // fake players are not real accounts
   assert.equal(posts.length, 1);

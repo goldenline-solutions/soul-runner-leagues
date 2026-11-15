@@ -78,7 +78,7 @@ async function applyRoles(i, ctx, discordId, { add, remove, freeAgent, owner, ca
 // however the role was given. Members on a roster are skipped (sync takes the role off them).
 // Returns { note, names, positions }: a note for the reply when the role holders could not be
 // read, and by Discord id each member's server profile name (nickname) and the position roles
-// they hold (PG, SG, LOCK, BACKEND, C: the same roles the solo queue reads).
+// they hold (PG, SG, SF, PF, C: the same roles the solo queue reads).
 async function adoptRoleHolders(i, ctx) {
   const names = new Map(), positions = new Map();
   if (!ctx.freeAgentRoleId) return { names, positions, note: 'No free agent role is set, so only the pool is shown. Run `/roster autoroles`, or set `FREE_AGENT_ROLE_ID`.' };

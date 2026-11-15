@@ -10,7 +10,7 @@
 import { STAT_KEYS, UserError } from './league.js';
 import { ingestScreenshot, storeScreenshot } from './ingest.js';
 
-export const POSITIONS = ['PG', 'SG', 'LOCK', 'BACKEND', 'C'];
+export const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
 export const ACCEPT_MINUTES = 5;
 export const STALE_HOURS = 3;
 // Made-up players for testing alone (fillWithFakes). They never accept.
@@ -20,7 +20,7 @@ export const FAKE_IDS = Array.from({ length: 9 }, (_, n) => `1000000000000000${S
 const LOCK = 'SELECT pg_advisory_xact_lock(727276)';
 const ENTRY = `SELECT e.*, u.discord_id, u.discord_name FROM solo_queue_entries e JOIN users u ON u.id = e.user_id`;
 
-// Discord role names -> positions. A role named "pg" or " Lock " counts.
+// Discord role names -> positions. A role named "pg" or " Sf " counts.
 export const positionsFromRoles = names => POSITIONS.filter(p => names.some(n => String(n).trim().toUpperCase() === p));
 
 const getMatch = (db, id) => db.get('SELECT * FROM solo_matches WHERE id = ?', id);

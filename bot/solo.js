@@ -1,4 +1,4 @@
-// Solo queue in Discord. Players queue alone; their positions are the PG / SG / LOCK / BACKEND / C
+// Solo queue in Discord. Players queue alone; their positions are the PG / SG / SF / PF / C
 // roles they hold in the server. Every command and button calls src/solo.js, then sync() brings
 // Discord in line with the database, the same way bot/scrim.js does for the team queue:
 // the matcher, a private thread per match, and the pinned live queue message.
