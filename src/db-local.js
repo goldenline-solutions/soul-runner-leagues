@@ -4,7 +4,16 @@
 import { mkdirSync } from 'node:fs';
 import { wrap, setup } from './db.js';
 
-export async function connectLocal(dir) {
+// A folder can be open only once, so two callers in one process (npm run dev:test runs the site
+// and the bot together) share the connection.
+const open = new Map();
+export function connectLocal(dir) {
+  if (!dir) return openLocal();
+  if (!open.has(dir)) open.set(dir, openLocal(dir));
+  return open.get(dir);
+}
+
+async function openLocal(dir) {
   const { PGlite } = await import('@electric-sql/pglite');
   if (dir) mkdirSync(dir, { recursive: true });
   const lite = new PGlite(dir);

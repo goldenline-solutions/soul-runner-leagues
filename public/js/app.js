@@ -63,9 +63,14 @@ function renderNav(active) {
     : '') + (admin ? `<span class="staff-links">${PAGES.filter(isStaff).map(p => link(p, 'staff-link')).join('')}</span>` : '');
   $('#headerMeta').classList.toggle('has-staff', admin);
   if (DESKTOP.matches) $('#nav .active')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  $('#footerAuth').innerHTML = admin
+  const { user, discord_login: discordLogin } = store.data.me;
+  // Team owners and captains log in with Discord to manage their own roster.
+  const discord = user
+    ? `<span class="muted">Logged in as ${esc(user.name)}</span> · <button class="link-btn" data-discord-logout>Log out</button>`
+    : discordLogin ? '<a class="muted" href="/api/auth/discord">Team owner login (Discord)</a>' : '';
+  $('#footerAuth').innerHTML = [discord, admin
     ? '<span class="muted">Commissioner mode</span> · <button class="link-btn" data-logout>Log out</button>'
-    : '<a class="muted" href="#game">Commissioner login</a>';
+    : '<a class="muted" href="#game">Commissioner login</a>'].filter(Boolean).join(' · ');
 }
 
 function render() {
@@ -146,6 +151,7 @@ function openRosterEditor(teamId) {
       <p class="msg" id="staffMsg" role="status"></p>
     </section>`;
   dialog.showModal();
+  dialog.onchange = null;
   dialog.onclick = async e => {
     const release = e.target.closest('[data-free-agency]');
     if (!release) return;
@@ -217,6 +223,62 @@ function openRosterEditor(teamId) {
   };
 }
 
+// ---------- roster manager for a team's owners and captains ----------
+// Sign a free agent, release a player, change a slot. src/roster.js enforces the limits.
+
+function openRosterManager(teamId, message = '') {
+  const t = store.data.teamById.get(Number(teamId));
+  if (!t) return;
+  const roster = store.data.rosterByTeam.get(t.id) || {};
+  const empty = SLOTS.filter(([key]) => !roster[key]?.tag);
+  const freeAgents = store.data.players.filter(p => p.free_agent);
+  const slotOptions = empty.map(([key, label]) => `<option value="${key}">${esc(label)}</option>`).join('');
+  const dialog = $('#dialog');
+  dialog.innerHTML = `
+    <div class="dialog-heading"><h2 id="dialogTitle">${esc(t.name)} · Manage Roster</h2><button type="button" class="btn-ghost" data-close>Close</button></div>
+    <section aria-label="Roster">
+      <h3 class="team-section-title">Roster</h3>
+      <ol class="roster">${SLOTS.map(([key]) => `<li><span class="pos">${key}</span>${roster[key]?.tag
+    ? `<span>${esc(roster[key].tag)}</span><span class="roster-tools">
+          ${empty.length ? `<select data-move="${roster[key].player_id}" aria-label="Move ${esc(roster[key].tag)} to another slot"><option value="">Move to…</option>${slotOptions}</select>` : ''}
+          <button type="button" class="btn-ghost btn-small" data-release="${roster[key].player_id}">Release</button></span>`
+    : '<span class="tba">Empty</span>'}</li>`).join('')}</ol>
+      <p class="muted small">A released player goes to free agency. In Discord the bot updates their roles.</p>
+    </section>
+    <section aria-label="Sign a free agent">
+      <h3 class="team-section-title">Sign a free agent</h3>
+      ${!empty.length ? '<p class="muted">The roster is full. Release someone first.</p>'
+    : !freeAgents.length ? '<p class="muted">There are no free agents right now.</p>'
+      : `<div class="registration-grid">
+        <label>Free agent<select id="signPlayer">${freeAgents.map(p => `<option value="${p.id}">${esc(p.tag)}</option>`).join('')}</select></label>
+        <label>Slot<select id="signSlot">${slotOptions}</select></label>
+      </div>
+      <button type="button" id="signButton">Sign player</button>`}
+      <p class="muted small">Trades and signing a player who is not a free agent go through a commissioner.</p>
+    </section>
+    <p class="msg" id="managerMsg" role="status"></p>`;
+  if (!dialog.open) dialog.showModal();
+  setMsg($('#managerMsg'), message, message ? 'ok' : '');
+  const call = async (action, body, done) => {
+    try {
+      await api(`/api/teams/${t.id}/roster/${action}`, { method: 'POST', body });
+      await refresh();
+      openRosterManager(t.id, done);
+    } catch (err) {
+      setMsg($('#managerMsg'), err.message, 'error');
+    }
+  };
+  dialog.onclick = e => {
+    const release = e.target.closest('[data-release]');
+    if (release) call('release', { player_id: Number(release.dataset.release) }, 'Released to free agency.');
+    if (e.target.id === 'signButton') call('sign', { player_id: Number($('#signPlayer').value), slot: $('#signSlot').value }, 'Signed.');
+  };
+  dialog.onchange = e => {
+    const move = e.target.closest('[data-move]');
+    if (move?.value) call('slot', { player_id: Number(move.dataset.move), slot: move.value }, 'Slot changed.');
+  };
+}
+
 // ---------- global events ----------
 
 document.addEventListener('click', async e => {
@@ -229,6 +291,12 @@ document.addEventListener('click', async e => {
   if (e.target.closest('[data-close]')) return $('#dialog').close();
   const edit = e.target.closest('[data-edit-team]');
   if (edit) return openRosterEditor(edit.dataset.editTeam);
+  const manage = e.target.closest('[data-manage-team]');
+  if (manage) return openRosterManager(manage.dataset.manageTeam);
+  if (e.target.closest('[data-discord-logout]')) {
+    await api('/api/auth/logout', { method: 'POST', body: {} });
+    await refresh();
+  }
   if (e.target.closest('[data-logout]')) {
     await api('/api/logout', { method: 'POST', body: {} });
     location.hash = '#overview';

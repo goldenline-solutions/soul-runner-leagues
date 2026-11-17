@@ -102,7 +102,7 @@ export function teams(league) {
       </select>
     </label>
     <div class="grid team-grid" aria-live="polite">${shown.map(t => teamCard(t, table.get(t.id))).join('')}</div>
-    ${selected && d.me.admin ? `<div class="roster-actions"><button data-edit-team="${esc(selected)}">Update Roster</button></div>` : ''}
+    ${selected ? rosterButton({ id: Number(selected) }) : ''}
   </div>`;
 }
 
@@ -113,6 +113,13 @@ function teamCard(t, rec) {
     ${rosterList(t)}
     ${teamDetails(t)}
   </article>`;
+}
+
+// The commissioner edits everything; a team's owners and captains manage their own roster.
+function rosterButton(t) {
+  const { admin, manages } = store.data.me;
+  if (admin) return `<div class="roster-actions"><button data-edit-team="${t.id}">Update Roster</button></div>`;
+  return manages.includes(t.id) ? `<div class="roster-actions"><button data-manage-team="${t.id}">Manage Roster</button></div>` : '';
 }
 
 function rosterList(t) {
@@ -180,7 +187,7 @@ export function team(id) {
         <h3 class="team-section-title">Roster</h3>
         ${rosterList(t)}
         ${teamDetails(t)}
-        ${d.me.admin ? `<div class="roster-actions"><button data-edit-team="${t.id}">Update Roster</button></div>` : ''}
+        ${rosterButton(t)}
       </section>
       <section class="team-player-stats">
         <h3 class="team-section-title">Player Stats</h3>

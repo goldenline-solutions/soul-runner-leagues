@@ -4,6 +4,7 @@ import { UserError } from './league.js';
 import * as api from './api.js';
 import { ingestConfig, ingestScreenshot, readScreenshot } from './ingest.js';
 import * as scrim from './scrim.js';
+import * as roster from './roster.js';
 import { discordOAuth } from './discord-oauth.js';
 
 export const SECURITY_HEADERS = {
@@ -33,7 +34,7 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
 
   // [method, pattern, handler, options]. Handlers receive ctx and return JSON-able data.
   const routes = [
-    ['GET', /^\/api\/bootstrap$/, ctx => api.bootstrap(db, { admin: ctx.admin })],
+    ['GET', /^\/api\/bootstrap$/, ctx => api.bootstrap(db, { admin: ctx.admin, userId: auth.userId(ctx.cookies), discordLogin: discord.enabled })],
     ['GET', /^\/api\/games\/(\d+)$/, ctx => api.gameDetail(db, id(ctx.params[0]))],
     ['GET', /^\/api\/stats$/, ctx => api.stats(db, {
       league: ctx.query.get('league') || 'premier', phase: ctx.query.get('phase') || 'regular',
@@ -111,6 +112,12 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
       return { user: user ?? null, ...(user ? await scrim.queueStatus(db, user.id) : {}), discord_login: discord.enabled };
     }],
 
+    // A team's roster, for its owners and captains (logged in with Discord) and the commissioner.
+    // src/roster.js checks that the caller runs this team and applies the owner limits.
+    ['POST', /^\/api\/teams\/(\d+)\/roster\/sign$/, async ctx => roster.siteSign(db, { teamId: id(ctx.params[0]), playerId: id(ctx.body.player_id), slot: ctx.body.slot, actor: await ctx.actor() })],
+    ['POST', /^\/api\/teams\/(\d+)\/roster\/release$/, async ctx => roster.siteRelease(db, { teamId: id(ctx.params[0]), playerId: id(ctx.body.player_id), actor: await ctx.actor() })],
+    ['POST', /^\/api\/teams\/(\d+)\/roster\/slot$/, async ctx => roster.siteSlot(db, { teamId: id(ctx.params[0]), playerId: id(ctx.body.player_id), slot: ctx.body.slot, actor: await ctx.actor() })],
+
     // Scrim queue. The same src/scrim.js functions the Discord bot calls; the bot's 30 second tick
     // opens the match thread for anything matched from here.
     ['GET', /^\/api\/queue$/, async () => ({ entries: await scrim.listQueue(db) })],
@@ -171,6 +178,13 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
         const userId = auth.userId(cookies);
         if (!userId) throw new UserError('Log in with Discord first.', 401);
         return userId;
+      },
+      // Who is changing a roster: the commissioner, or the Discord account logged in here.
+      actor: async () => {
+        if (admin) return { commissioner: true };
+        const user = await db.get('SELECT discord_id FROM users WHERE id = ?', ctx.user());
+        if (!user) throw new UserError('Log in with Discord first.', 401);
+        return { commissioner: false, discordId: user.discord_id };
       },
       // Vercel sets x-real-ip / x-forwarded-for itself, so clients can't spoof them there.
       ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown',

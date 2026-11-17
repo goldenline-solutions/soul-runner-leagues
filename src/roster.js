@@ -188,6 +188,59 @@ export async function recordSiteSave(t, team, before, after) {
   }
 }
 
+// The site's team page, for a team's owners and captains (logged in with Discord) and for the
+// commissioner. Same rules and limits as the /roster commands, but by player record instead of
+// Discord member, because a player typed on the site may have no Discord account on record.
+
+// Signs a player to a team. Owners and captains can only sign someone from the free agent pool.
+export async function siteSign(db, { teamId, playerId, slot, actor }) {
+  return db.tx(async t => {
+    await t.get(LOCK);
+    const team = await getTeam(t, teamId);
+    await mustManage(t, actor, team);
+    const player = await t.get('SELECT * FROM players WHERE id = ?', playerId);
+    if (!player) throw new UserError('Choose a player.', 404);
+    const current = (await spotsOf(t, player.id)).find(s => s.league_id === team.league_id);
+    if (current) throw new UserError(`${player.discord_tag} is already on ${current.team} in ${team.league}.`, 409);
+    if (limited(actor) && !player.free_agent) throw new UserError(`${player.discord_tag} is not a free agent, so only a commissioner can sign them.`, 403);
+    const into = await emptySlot(t, team, slot || null);
+    await t.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?', player.id, team.id, into);
+    await t.run('UPDATE players SET free_agent = false WHERE id = ?', player.id);
+    await log(t, player.id, 'sign', null, team.id, actor?.discordId, 'site');
+    return { ok: true, slot: into };
+  });
+}
+
+// Takes a player off a team. With no team left they go into the free agent pool.
+export async function siteRelease(db, { teamId, playerId, actor }) {
+  return db.tx(async t => {
+    await t.get(LOCK);
+    const team = await getTeam(t, teamId);
+    await mustManage(t, actor, team);
+    const spot = await t.get('SELECT slot FROM roster_slots WHERE team_id = ? AND player_id = ?', teamId, playerId);
+    if (!spot) throw new UserError('That player is not on this team.', 404);
+    await t.run('UPDATE roster_slots SET player_id = NULL WHERE team_id = ? AND slot = ?', teamId, spot.slot);
+    if (!(await spotsOf(t, playerId)).length) await t.run('UPDATE players SET free_agent = true WHERE id = ?', playerId);
+    await log(t, playerId, 'release', team.id, null, actor?.discordId, 'site');
+    return { ok: true };
+  });
+}
+
+// Moves a player on the team to one of its empty slots.
+export async function siteSlot(db, { teamId, playerId, slot, actor }) {
+  return db.tx(async t => {
+    await t.get(LOCK);
+    const team = await getTeam(t, teamId);
+    await mustManage(t, actor, team);
+    const spot = await t.get('SELECT slot FROM roster_slots WHERE team_id = ? AND player_id = ?', teamId, playerId);
+    if (!spot) throw new UserError('That player is not on this team.', 404);
+    const into = await emptySlot(t, team, slot || 'none');
+    await t.run('UPDATE roster_slots SET player_id = NULL WHERE team_id = ? AND slot = ?', teamId, spot.slot);
+    await t.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?', playerId, teamId, into);
+    return { ok: true, slot: into };
+  });
+}
+
 // Moves the bot has not handled yet, oldest first, with what it needs to post them.
 export const movesToPost = db => db.all(`SELECT m.id, m.action, m.source, m.from_team_id, m.to_team_id,
     p.discord_tag AS tag, COALESCE(m.discord_id, p.discord_id) AS discord_id, p.free_agent,

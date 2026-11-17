@@ -144,6 +144,11 @@ both answer.
    league's.
 3. `npm run bot:test`, open the invite link it prints, add the test bot to the test server.
 
+**The test site and the test bot together.** `npm run dev:test` starts both in one process on
+`.env.test`, sharing the test database, so the site-to-Discord roster sync can be tried end to
+end: the site is at `http://localhost:8790` (set `PORT`, `ADMIN_PASSWORD` and `SESSION_SECRET` in
+`.env.test`). Use it instead of `npm run bot:test`, not next to it.
+
 The two bots are separate Discord applications, so both can run at once. Never put the live token
 or the live `DATABASE_URL` in `.env.test`.
 
@@ -268,6 +273,14 @@ On the site, a commissioner opens a team's **Update Roster** dialog to: fill or 
 **Send to free agency** next to a player (off the team at once, into the free agent pool), and
 add or remove the team's **owners and captains** (players linked to a Discord account only). The
 bot applies the matching Discord roles.
+
+**Owners and captains on the site.** With "Log in with Discord" set up (`DISCORD_CLIENT_ID`,
+`DISCORD_CLIENT_SECRET`, `SITE_URL`; see `.env.example`), the footer shows **Team owner login
+(Discord)**. Someone who is an owner or captain of a team (`/roster staff`, or the Update Roster
+dialog) then gets a **Manage Roster** button on that team's page, with the same limits as their
+`/roster` commands: sign a player from the free agent pool, release a player, move a player to an
+empty slot. Trades, staff changes and signing someone who is not a free agent stay with the
+commissioner. The bot applies the Discord roles for these changes like any other site change.
 
 `npm start` uses `.env`, which may point at the live database. For a local look on a throwaway
 database, run `node server.js .env.preview` with a settings file that leaves `DATABASE_URL` blank.

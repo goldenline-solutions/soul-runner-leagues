@@ -95,3 +95,41 @@ test('an owner or captain set on the site gets the team role and the Owner / Cap
   assert.deepEqual(roles, ['-team-role 111', '-owner-role 111', '-captain-role 111']);
   assert.deepEqual(posts, []); // staff changes are not transactions
 });
+
+test('an owner logged in with Discord manages their own roster on the site, within the owner limits', async () => {
+  const db = await connectLocal();
+  const [mine, theirs] = await db.all("SELECT id, name FROM teams WHERE league_id = 'premier' ORDER BY id LIMIT 2");
+  const owner = { commissioner: false, discordId: '500' };
+  await roster.setStaff(db, { teamId: mine.id, member: { id: '500', name: 'olive' }, role: 'owner' });
+  const user = await db.get("INSERT INTO users (discord_id, discord_name) VALUES ('500', 'olive') RETURNING id");
+
+  // The site knows which team they run.
+  const me = (await api.bootstrap(db, { admin: false, userId: user.id, discordLogin: true })).me;
+  assert.deepEqual(me, { admin: false, user: { name: 'olive' }, manages: [mine.id], discord_login: true });
+  assert.deepEqual((await api.bootstrap(db, { admin: false })).me.manages, []);
+
+  await roster.addFreeAgent(db, { member: { id: '111', name: 'ann' } });
+  await api.updateTeam(db, theirs.id, { roster: { PG: 'Taken' } });
+  const id = async tag => (await db.get('SELECT id FROM players WHERE discord_tag = ?', tag)).id;
+  const [ann, taken] = [await id('ann'), await id('Taken')];
+
+  // Sign: free agents only, own team only.
+  await assert.rejects(roster.siteSign(db, { teamId: theirs.id, playerId: ann, actor: owner }), /team you own or captain/);
+  await assert.rejects(roster.siteSign(db, { teamId: mine.id, playerId: taken, actor: owner }), /already on/);
+  await api.updateTeam(db, theirs.id, { roster: {} }); // Taken is released: now a free agent
+  assert.equal((await roster.siteSign(db, { teamId: mine.id, playerId: ann, slot: 'SG', actor: owner })).slot, 'SG');
+  const stray = await db.get("INSERT INTO players (discord_tag) VALUES ('NotInPool') RETURNING id");
+  await assert.rejects(roster.siteSign(db, { teamId: mine.id, playerId: stray.id, actor: owner }), /not a free agent/);
+  await roster.siteSign(db, { teamId: mine.id, playerId: stray.id, actor: { commissioner: true } }); // a commissioner can
+
+  // Slot change, then release back to free agency.
+  await assert.rejects(roster.siteSlot(db, { teamId: mine.id, playerId: ann, slot: 'PG', actor: owner }), /PG slot is taken/);
+  assert.equal((await roster.siteSlot(db, { teamId: mine.id, playerId: ann, slot: 'C', actor: owner })).slot, 'C');
+  await assert.rejects(roster.siteRelease(db, { teamId: theirs.id, playerId: ann, actor: owner }), /team you own or captain/);
+  await roster.siteRelease(db, { teamId: mine.id, playerId: ann, actor: owner });
+  assert.ok((await roster.freeAgents(db)).some(p => p.tag === 'ann'));
+
+  // Logged as site moves by this owner, so the bot applies the roles in Discord.
+  const moves = await db.all("SELECT action, source FROM roster_moves WHERE by_discord_id = '500' ORDER BY id");
+  assert.deepEqual(moves, [{ action: 'sign', source: 'site' }, { action: 'release', source: 'site' }]);
+});
