@@ -8,7 +8,8 @@ import { root, loadEnv } from './src/env.js';
 import { connectPostgres, setup } from './src/db.js';
 import { createApp, SECURITY_HEADERS } from './src/app.js';
 
-loadEnv();
+// `node server.js .env.preview` reads another settings file instead of .env (only that file).
+loadEnv(resolve(root, process.argv[2] || '.env'));
 
 const PORT = Number(process.env.PORT || 8787);
 const db = process.env.DATABASE_URL
@@ -57,7 +58,7 @@ function send(res, status, textBody) {
 
 server.listen(PORT, () => {
   console.log(`Soul Runner leagues running at http://localhost:${PORT}`);
-  console.log(process.env.DATABASE_URL ? 'Database: PostgreSQL (DATABASE_URL)' : 'Database: embedded Postgres in data/pglite');
+  console.log(process.env.DATABASE_URL ? 'Database: PostgreSQL (DATABASE_URL)' : `Database: embedded Postgres in ${process.env.LOCAL_DB_DIR || 'data/pglite'}`);
   if (!app.auth.enabled) console.warn('ADMIN_PASSWORD is not set: commissioner login is disabled.');
   if (!app.ingest.apiKey) console.warn('OPENAI_API_KEY is not set: screenshot reading is disabled (manual entry still works).');
   if (!process.env.SESSION_SECRET) console.warn('SESSION_SECRET is not set: commissioner logins reset when the server restarts.');

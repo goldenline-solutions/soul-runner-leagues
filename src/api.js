@@ -1,5 +1,5 @@
 import { ROSTER_SLOTS } from './seed.js';
-import { otherTeamInLeague } from './roster.js';
+import { otherTeamInLeague, lockRosters, recordSiteSave, setStaff, teamStaff } from './roster.js';
 import { STAT_KEYS, UserError, saveGame, deleteGame, playerIdForTag, fillRosters } from './league.js';
 
 const sumCols = STAT_KEYS.map(k => `SUM(b.${k})::int AS ${k}`).join(', ');
@@ -46,7 +46,8 @@ export async function bootstrap(db, { admin }) {
     db.all('SELECT * FROM series ORDER BY id'),
     db.all(`SELECT g.id, g.series_id, g.game_number, g.home_score, g.away_score, g.forfeit,
       EXISTS (SELECT 1 FROM box_scores b WHERE b.game_id = g.id) AS has_box FROM games g`),
-    db.all('SELECT id, discord_tag AS tag FROM players ORDER BY lower(discord_tag)'),
+    // linked: the record is connected to a Discord account, so the bot can give that person roles.
+    db.all('SELECT id, discord_tag AS tag, (discord_id IS NOT NULL) AS linked FROM players ORDER BY lower(discord_tag)'),
     db.all('SELECT * FROM news ORDER BY published_at DESC, id DESC LIMIT 50'),
     getSetting(db, 'allstar'),
     getSetting(db, 'rules'),
@@ -228,6 +229,8 @@ export async function updateTeam(db, id, body) {
   await db.tx(async t => {
     await t.run('UPDATE teams SET owner_coach = ?, stream_url = ?, sponsors = ?, affiliated_teams = ? WHERE id = ?',
       fields.owner_coach, fields.stream_url, fields.sponsors, fields.affiliated_teams, id);
+    await lockRosters(t);
+    const before = (await t.all('SELECT player_id FROM roster_slots WHERE team_id = ? AND player_id IS NOT NULL', id)).map(r => r.player_id);
     const placed = new Set();
     for (const slot of ROSTER_SLOTS) {
       const tag = text(body.roster?.[slot], 64);
@@ -241,7 +244,39 @@ export async function updateTeam(db, id, body) {
       }
       await t.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?', playerId, id, slot);
     }
+    // Signings and releases made here reach Discord through the bot (roles, transactions channel).
+    await recordSiteSave(t, team, before, [...placed]);
   });
+}
+
+// Takes one player off a team and puts them in the free agent pool (when they have no other team).
+export async function sendToFreeAgency(db, teamId, playerId) {
+  const team = await db.get('SELECT * FROM teams WHERE id = ?', teamId);
+  if (!team) throw new UserError('Team not found.', 404);
+  await db.tx(async t => {
+    await lockRosters(t);
+    const spot = await t.get('SELECT slot FROM roster_slots WHERE team_id = ? AND player_id = ?', teamId, playerId);
+    if (!spot) throw new UserError('That player is not on this team.', 404);
+    await t.run('UPDATE roster_slots SET player_id = NULL WHERE team_id = ? AND slot = ?', teamId, spot.slot);
+    await recordSiteSave(t, team, [playerId], []);
+  });
+  return { ok: true };
+}
+
+// Owners and captains (team_staff), set from the site. The bot gives them their Discord roles.
+export const listTeamStaff = (db, teamId) => teamStaff(db, teamId);
+
+export async function addTeamStaff(db, teamId, body) {
+  const player = await db.get('SELECT discord_tag, discord_id FROM players WHERE id = ?', Number(body.player_id) || 0);
+  if (!player) throw new UserError('Choose a player.');
+  if (!player.discord_id) throw new UserError(`${player.discord_tag} is not linked to a Discord account yet. Run /roster link in Discord first.`, 409);
+  await setStaff(db, { teamId, member: { id: player.discord_id, name: player.discord_tag }, role: body.role, source: 'site' });
+  return teamStaff(db, teamId);
+}
+
+export async function removeTeamStaff(db, teamId, discordId) {
+  await setStaff(db, { teamId, member: { id: discordId, name: 'That member' }, role: null, source: 'site' });
+  return teamStaff(db, teamId);
 }
 
 export async function assignSeries(db, id, body) {

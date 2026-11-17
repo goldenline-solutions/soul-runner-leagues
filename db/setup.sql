@@ -385,7 +385,28 @@ ALTER TABLE roster_moves DROP CONSTRAINT roster_moves_action_check;
 ALTER TABLE roster_moves ADD CONSTRAINT roster_moves_action_check
   CHECK (action IN ('sign', 'release', 'move', 'free_agent', 'free_agent_removed'));
 
-INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql'), ('0010_free_agent_removed.sql');
+-- ===== 0011_roster_moves_posted.sql =====
+-- Roster changes made on the site now reach Discord: the bot picks up every move it has not
+-- handled yet, fixes the player's roles and posts it in the transactions channel (bot/roster.js).
+
+-- Where the change was made: a /roster command ('discord') or the site's roster editor ('site').
+ALTER TABLE roster_moves ADD COLUMN source TEXT NOT NULL DEFAULT 'discord' CHECK (source IN ('discord', 'site'));
+-- False until the bot has handled the move. Moves from before this migration count as handled.
+ALTER TABLE roster_moves ADD COLUMN posted BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE roster_moves ALTER COLUMN posted SET DEFAULT FALSE;
+CREATE INDEX roster_moves_unposted ON roster_moves (id) WHERE NOT posted;
+
+-- ===== 0012_staff_moves.sql =====
+-- Owner and captain changes go in the move log too, so one made on the site reaches Discord
+-- (the bot gives or takes the team role and the Owner / Captain roles).
+ALTER TABLE roster_moves DROP CONSTRAINT roster_moves_action_check;
+ALTER TABLE roster_moves ADD CONSTRAINT roster_moves_action_check
+  CHECK (action IN ('sign', 'release', 'move', 'free_agent', 'free_agent_removed', 'staff'));
+-- An owner or captain need not be a player: a staff move names the Discord account instead.
+ALTER TABLE roster_moves ALTER COLUMN player_id DROP NOT NULL;
+ALTER TABLE roster_moves ADD COLUMN discord_id TEXT;
+
+INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql'), ('0010_free_agent_removed.sql'), ('0011_roster_moves_posted.sql'), ('0012_staff_moves.sql');
 
 -- ===== Season 1 data =====
 INSERT INTO leagues (id, name, season_name, blurb, sort) VALUES

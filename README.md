@@ -256,6 +256,22 @@ the site shows, so a signing appears on the team page at once. Code: `src/roster
 **The rule:** a player is on at most one team per league. One Premier team and one Affiliate team
 is allowed; two teams in the same league is refused. The site's roster editor follows the same rule.
 
+**The site and Discord stay in step.** Both write the same database, so a `/roster` change shows
+on the team page at once. A change saved in the site's roster editor is picked up by the bot
+within 15 seconds: it gives or takes the player's team and free agent roles (for players linked to
+a Discord account) and updates the free agent pool. With `ROSTER_LOG_CHANNEL_ID` set to a
+transactions channel, the bot also posts every signing, release and trade there, whether it was
+made with a command or on the site. The bot has to be running for this; changes made while it is
+off are handled when it starts.
+
+On the site, a commissioner opens a team's **Update Roster** dialog to: fill or clear slots, press
+**Send to free agency** next to a player (off the team at once, into the free agent pool), and
+add or remove the team's **owners and captains** (players linked to a Discord account only). The
+bot applies the matching Discord roles.
+
+`npm start` uses `.env`, which may point at the live database. For a local look on a throwaway
+database, run `node server.js .env.preview` with a settings file that leaves `DATABASE_URL` blank.
+
 **Setup**
 
 1. Give the bot the **Manage Roles** permission, and drag its role above every team role and the

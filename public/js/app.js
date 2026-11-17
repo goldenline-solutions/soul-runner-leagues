@@ -99,6 +99,7 @@ function openRosterEditor(teamId) {
   if (!t) return;
   const roster = store.data.rosterByTeam.get(t.id) || {};
   const dialog = $('#dialog');
+  const onRoster = SLOTS.filter(([key]) => roster[key]?.tag);
   const input = (name, label, value, type = 'text', extra = '') =>
     `<label>${label}<input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`;
   dialog.innerHTML = `
@@ -124,8 +125,56 @@ function openRosterEditor(teamId) {
       <p class="muted">Roster player slots use Discord tags. New tags become league players automatically.</p>
       <button>Save roster</button> <button type="button" class="btn-ghost" data-close>Cancel</button>
       <p class="msg" role="status"></p>
-    </form>`;
+    </form>
+    <section aria-label="Free agency">
+      <h3 class="team-section-title">Send a player to free agency</h3>
+      ${onRoster.length ? `<ol class="roster">${onRoster.map(([key]) => `<li><span class="pos">${key}</span><span>${esc(roster[key].tag)}</span>
+        <button type="button" class="btn-ghost btn-small" data-free-agency="${roster[key].player_id}">Send to free agency</button></li>`).join('')}</ol>`
+    : '<p class="muted">Nobody is on this roster.</p>'}
+      <p class="muted small">Takes the player off this team right away. In Discord the bot removes the team role and gives the free agent role.</p>
+      <p class="msg" id="freeAgencyMsg" role="status"></p>
+    </section>
+    <section aria-label="Owners and captains">
+      <h3 class="team-section-title">Owners and captains</h3>
+      <div id="staffList"><p class="muted">Loading…</p></div>
+      <div class="registration-grid">
+        <label>Player<select id="staffPlayer"><option value="">Choose a player</option>${store.data.players.filter(p => p.linked).map(p => `<option value="${p.id}">${esc(p.tag)}</option>`).join('')}</select></label>
+        <label>Position<select id="staffRole"><option value="owner">Owner</option><option value="captain">Captain</option></select></label>
+      </div>
+      <button type="button" id="staffAdd">Add</button>
+      <p class="muted small">Only players linked to a Discord account are listed (link one with /roster link in Discord). The bot gives them the team role and the Owner or Captain role.</p>
+      <p class="msg" id="staffMsg" role="status"></p>
+    </section>`;
   dialog.showModal();
+  dialog.onclick = async e => {
+    const release = e.target.closest('[data-free-agency]');
+    if (!release) return;
+    try {
+      await api(`/api/admin/teams/${t.id}/free-agency`, { method: 'POST', body: { player_id: Number(release.dataset.freeAgency) } });
+      await refresh();
+      openRosterEditor(t.id);
+      setMsg($('#freeAgencyMsg'), 'Sent to free agency.', 'ok');
+    } catch (err) {
+      setMsg($('#freeAgencyMsg'), err.message, 'error');
+    }
+  };
+  const showStaff = staff => {
+    $('#staffList').innerHTML = staff.length
+      ? `<ol class="roster">${staff.map(st => `<li><span class="pos">${st.role === 'owner' ? 'OWN' : 'CAP'}</span><span>${esc(st.discord_name)}</span>
+        <button type="button" class="btn-ghost btn-small" data-staff-remove="${esc(st.discord_id)}">Remove</button></li>`).join('')}</ol>`
+      : '<p class="muted">No owner or captain set.</p>';
+  };
+  const staffCall = (path, options) => api(`/api/admin/teams/${t.id}/staff${path}`, options).then(showStaff)
+    .catch(err => setMsg($('#staffMsg'), err.message, 'error'));
+  staffCall('');
+  $('#staffAdd').onclick = () => {
+    setMsg($('#staffMsg'), '');
+    staffCall('', { method: 'POST', body: { player_id: Number($('#staffPlayer').value), role: $('#staffRole').value } });
+  };
+  $('#staffList').onclick = e => {
+    const remove = e.target.closest('[data-staff-remove]');
+    if (remove) staffCall(`/${remove.dataset.staffRemove}`, { method: 'DELETE' });
+  };
   const afterLogo = async text => {
     await refresh(); // re-renders the page behind the dialog with the new logo
     openRosterEditor(t.id);

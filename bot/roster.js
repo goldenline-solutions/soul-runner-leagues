@@ -114,6 +114,51 @@ async function adoptRoleHolders(i, ctx) {
   return { names, positions, note: '' };
 }
 
+// ---------- the transactions channel, and changes made on the site ----------
+
+const TICK_MS = 15_000;
+const SHOWN = ['sign', 'release', 'move'];
+
+function moveText(m) {
+  const who = m.discord_id ? `<@${m.discord_id}>` : `**${m.tag}**`;
+  const via = m.source === 'site' ? ' (on the website)' : '';
+  if (m.action === 'sign') return `✅ ${who} signed with **${m.to_team}**${via}.`;
+  if (m.action === 'release') return `${who} was released by **${m.from_team}**${m.free_agent ? ' and is now a free agent' : ''}${via}.`;
+  return `🔁 ${who} moved from **${m.from_team}** to **${m.to_team}**${via}.`;
+}
+
+// Handles every roster move not handled yet. A change made on the site gets its Discord roles
+// here (a /roster command already set them). With ROSTER_LOG_CHANNEL_ID set, signings, releases
+// and trades are posted in that channel, wherever they were made.
+export async function postMoves(client, base) {
+  const moves = await roster.movesToPost(base.db);
+  if (!moves.length) return;
+  const ctx = await withRoles(base);
+  const guild = client.guilds.cache.get(ctx.guildId) ?? client.guilds.cache.first();
+  for (const m of moves) {
+    await roster.markPosted(ctx.db, m.id); // first: a move that cannot be posted is not retried forever
+    if (m.source === 'site' && m.discord_id && guild) {
+      // The roles they should hold now, from the rosters as they are.
+      const should = (await roster.audit(ctx.db)).members.find(x => x.discord_id === m.discord_id) ?? { roleIds: [] };
+      const remove = m.from_role_id && !should.roleIds.includes(m.from_role_id) ? [m.from_role_id] : [];
+      // An owner / captain change sets those two roles; a roster change sets the free agent role.
+      const flags = m.action === 'staff' ? { owner: Boolean(should.owner), captain: Boolean(should.captain) } : { freeAgent: should.freeAgent };
+      const warnings = await applyRoles({ guild, user: { username: 'the website' } }, ctx, m.discord_id, { add: should.roleIds, remove, ...flags });
+      if (warnings.length) console.warn(`Roles for ${m.tag ?? m.discord_id} after a website roster change: ${warnings.join('; ')}`);
+    }
+    const slotChange = m.action === 'move' && m.from_team_id === m.to_team_id;
+    if (!ctx.rosterChannelId || !SHOWN.includes(m.action) || slotChange) continue;
+    const channel = await client.channels.fetch(ctx.rosterChannelId);
+    await channel.send({ content: moveText(m), allowedMentions: { parse: [] } });
+  }
+}
+
+function start(client, ctx) {
+  const run = () => postMoves(client, ctx).catch(err => console.error(err));
+  run();
+  setInterval(run, TICK_MS);
+}
+
 const withWarnings = (text, warnings) => (warnings.length
   ? `${text}\n⚠️ ${warnings.join('\n⚠️ ')}\nCheck that the bot has Manage Roles and that its role is above these roles, then run \`/roster sync\`.`
   : text);
@@ -295,6 +340,7 @@ export async function handle(interaction, base) {
       throw new UserError('Only a commissioner can do that.', 403);
     }
     await ACTIONS[key](interaction, ctx);
+    if (ctx.rosterChannelId && interaction.channelId === ctx.rosterChannelId) await roster.markPostedBy(ctx.db, interaction.user.id);
   } catch (err) {
     if (!(err instanceof UserError)) console.error(err);
     const content = err instanceof UserError ? err.message : 'Something went wrong. Try again.';
@@ -302,4 +348,4 @@ export async function handle(interaction, base) {
   }
 }
 
-export default { commands, names: ['roster'], handle };
+export default { commands, names: ['roster'], handle, start };

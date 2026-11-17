@@ -27,8 +27,8 @@ async function getTeam(t, teamId) {
 
 // Every roster spot a player holds: at most one per league.
 const spotsOf = (t, playerId) => t.all(`${SPOTS} WHERE rs.player_id = ? ORDER BY l.sort, t.name`, playerId);
-const log = (t, playerId, action, fromTeamId, toTeamId, by) => t.run(`INSERT INTO roster_moves
-  (player_id, action, from_team_id, to_team_id, by_discord_id) VALUES (?, ?, ?, ?, ?)`, playerId, action, fromTeamId, toTeamId, by ?? null);
+const log = (t, playerId, action, fromTeamId, toTeamId, by, source = 'discord') => t.run(`INSERT INTO roster_moves
+  (player_id, action, from_team_id, to_team_id, by_discord_id, source) VALUES (?, ?, ?, ?, ?, ?)`, playerId, action, fromTeamId, toTeamId, by ?? null, source);
 const roleIds = (...ids) => ids.filter(Boolean);
 
 const isStaff = (t, teamId, discordId) => t.get('SELECT role FROM team_staff WHERE team_id = ? AND discord_id = ?', teamId, String(discordId));
@@ -170,6 +170,35 @@ export async function removeFreeAgent(db, { discordId, by }) {
   return { player, roles: { add: [], remove: [], freeAgent: false } };
 }
 
+// ---------- changes made on the site ----------
+
+// The site's roster editor (updateTeam in src/api.js) saves a whole roster at once. Called inside
+// its transaction: `before` and `after` are the player ids on the team before and after the save.
+// Writes the same move log and free agent flags as the commands above, so the bot can pick the
+// changes up (movesToPost). A slot change within the team is not a move.
+export const lockRosters = t => t.get(LOCK);
+export async function recordSiteSave(t, team, before, after) {
+  for (const playerId of before.filter(id => !after.includes(id))) {
+    if (!(await spotsOf(t, playerId)).length) await t.run('UPDATE players SET free_agent = true WHERE id = ?', playerId);
+    await log(t, playerId, 'release', team.id, null, null, 'site');
+  }
+  for (const playerId of after.filter(id => !before.includes(id))) {
+    await t.run('UPDATE players SET free_agent = false WHERE id = ?', playerId);
+    await log(t, playerId, 'sign', null, team.id, null, 'site');
+  }
+}
+
+// Moves the bot has not handled yet, oldest first, with what it needs to post them.
+export const movesToPost = db => db.all(`SELECT m.id, m.action, m.source, m.from_team_id, m.to_team_id,
+    p.discord_tag AS tag, COALESCE(m.discord_id, p.discord_id) AS discord_id, p.free_agent,
+    f.name AS from_team, f.discord_role_id AS from_role_id, tt.name AS to_team
+  FROM roster_moves m LEFT JOIN players p ON p.id = m.player_id
+  LEFT JOIN teams f ON f.id = m.from_team_id LEFT JOIN teams tt ON tt.id = m.to_team_id
+  WHERE NOT m.posted ORDER BY m.id LIMIT 20`);
+export const markPosted = (db, id) => db.run('UPDATE roster_moves SET posted = true WHERE id = ?', id);
+// A command run in the transactions channel has already been answered there: no second message.
+export const markPostedBy = (db, discordId) => db.run('UPDATE roster_moves SET posted = true WHERE NOT posted AND by_discord_id = ?', String(discordId));
+
 export const freeAgents = db => db.all(`SELECT p.id, p.discord_tag AS tag, p.discord_id,
     (SELECT MAX(m.created_at) FROM roster_moves m WHERE m.player_id = p.id) AS since
   FROM players p WHERE p.free_agent ORDER BY since NULLS LAST, lower(p.discord_tag)`);
@@ -181,7 +210,7 @@ export const STAFF_ROLES = ['owner', 'captain'];
 // Makes a member an owner or captain of a team, or (role null) takes that away.
 // `roles.owner` / `roles.captain` say whether they should hold the server-wide Owner and Captain
 // roles afterwards: true while they hold that position on any team.
-export async function setStaff(db, { teamId, member, role }) {
+export async function setStaff(db, { teamId, member, role, source = 'discord' }) {
   if (role !== null && !STAFF_ROLES.includes(role)) throw new UserError('Position must be owner or captain.');
   return db.tx(async t => {
     await t.get(LOCK);
@@ -194,6 +223,10 @@ export async function setStaff(db, { teamId, member, role }) {
       if (!(await isStaff(t, team.id, member.id))) throw new UserError(`${member.name} is not an owner or captain of ${team.name}.`, 404);
       await t.run('DELETE FROM team_staff WHERE team_id = ? AND discord_id = ?', team.id, String(member.id));
     }
+    // Logged like a roster move, so a change made on the site reaches Discord (movesToPost).
+    const record = await t.get('SELECT id FROM players WHERE discord_id = ?', String(member.id));
+    await t.run(`INSERT INTO roster_moves (player_id, discord_id, action, from_team_id, to_team_id, source) VALUES (?, ?, 'staff', ?, ?, ?)`,
+      record?.id ?? null, String(member.id), role ? null : team.id, role ? team.id : null, source);
     const now = (await t.all('SELECT role FROM team_staff WHERE discord_id = ?', String(member.id))).map(r => r.role);
     // Coming off the staff, they keep the team role only if they still play for the team.
     const plays = await t.get(`SELECT 1 AS x FROM roster_slots rs JOIN players p ON p.id = rs.player_id
