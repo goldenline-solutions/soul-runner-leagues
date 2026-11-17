@@ -133,6 +133,10 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
     ['GET', /^\/api\/admin\/claims$/, () => roster.pendingClaims(db), { admin: true }],
     ['POST', /^\/api\/admin\/claims\/(\d+)\/(approve|reject)$/, ctx => roster.decideClaim(db, { claimId: id(ctx.params[0]), approve: ctx.params[1] === 'approve' }), { admin: true }],
 
+    // Aliases on a profile: its owner (Discord login) or the commissioner.
+    ['POST', /^\/api\/players\/(\d+)\/aliases$/, async ctx => api.addAlias(db, id(ctx.params[0]), await ctx.actor(), ctx.body)],
+    ['DELETE', /^\/api\/players\/(\d+)\/aliases\/(\d+)$/, async ctx => api.removeAlias(db, id(ctx.params[0]), await ctx.actor(), id(ctx.params[1]))],
+
     // Scrim queue. The same src/scrim.js functions the Discord bot calls; the bot's 30 second tick
     // opens the match thread for anything matched from here.
     ['GET', /^\/api\/queue$/, async () => ({ entries: await scrim.listQueue(db) })],

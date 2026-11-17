@@ -516,13 +516,25 @@ function claimLine(playerId) {
 }
 
 player.after = async (el, id) => {
-  const { player: p, games } = await api(`/api/players/${id}`);
+  const { player: p, games, aliases } = await api(`/api/players/${id}`);
+  const { me } = store.data;
+  const canEdit = me.admin || me.player_id === Number(id);
   const n = games.length;
   const avg = k => (n ? (games.reduce((t, g) => t + g[k], 0) / n).toFixed(1) : '—');
   const sum = k => games.reduce((t, g) => t + g[k], 0);
   $('#playerPanel', el).innerHTML = `
     <h2>${esc(p.tag)}</h2>
     ${claimLine(Number(id))}
+    ${aliases.length || canEdit ? `<section class="alias-box" aria-label="Aliases">
+      <p class="muted">Also known as: ${aliases.length ? aliases.map(a => `<strong>${esc(a.alias)}</strong>${canEdit
+    ? ` <button class="link-btn" data-alias-remove="${a.id}" aria-label="Remove alias ${esc(a.alias)}">remove</button>` : ''}`).join(' · ') : 'no other names yet'}</p>
+      ${canEdit ? `<form id="aliasForm" class="toolbar">
+        <label>Add a name you play under <input name="alias" maxlength="64" required placeholder="Steam or in-game name"></label>
+        <button class="btn-small">Add alias</button>
+      </form>
+      <p class="muted small">Box score screenshots that show one of these names are matched to this profile, so a Steam name change does not split your stats.</p>
+      <p class="msg" id="aliasMsg" role="status"></p>` : ''}
+    </section>` : ''}
     <div class="stats">
       <div class="stat"><strong>${n}</strong><span>GAMES</span></div>
       <div class="stat"><strong>${avg('pts')}</strong><span>POINTS PER GAME</span></div>
@@ -539,6 +551,23 @@ player.after = async (el, id) => {
           <td class="num">${g.pts}</td><td class="num">${g.reb}</td><td class="num">${g.ast}</td><td class="num">${g.stl}</td><td class="num">${g.blk}</td>
           <td class="num">${g.tov}</td><td class="num">${g.fgm}/${g.fga}</td><td class="num">${g.tpm}/${g.tpa}</td><td class="num">${g.ftm}/${g.fta}</td></tr>`;
       }).join('')}</tbody></table>`) : '<p>No games recorded yet.</p>'}`;
+  if (!canEdit) return;
+  const change = async (path, options) => {
+    try {
+      await api(`/api/players/${id}/aliases${path}`, options);
+      store.render();
+    } catch (err) {
+      setMsg($('#aliasMsg', el), err.message, 'error');
+    }
+  };
+  $('#aliasForm', el).onsubmit = e => {
+    e.preventDefault();
+    change('', { method: 'POST', body: formData(e.target) });
+  };
+  el.addEventListener('click', e => {
+    const remove = e.target.closest('[data-alias-remove]');
+    if (remove) change(`/${remove.dataset.aliasRemove}`, { method: 'DELETE' });
+  });
 };
 
 // ---------- Awards ----------

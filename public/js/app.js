@@ -53,14 +53,14 @@ function renderNav(active) {
   const isStaff = p => p[3]?.admin || p[3]?.staff;
   // Commissioner links sit in the top bar on wide screens and at the end of the nav row on phones.
   $('#nav').innerHTML = PAGES.filter(p => !p[3]?.under && !isStaff(p)).map(p => link(p)).join('')
-    + (admin ? PAGES.filter(isStaff).map(p => link(p, 'staff-nav')).join('') : '');
+    + (admin ? PAGES.filter(isStaff).map(p => link(p, 'staff-nav')).join('') : '') + discordButton('staff-nav');
   // Same links at the bottom of every page, so nobody has to scroll back up to change pages.
   $('#footerNav').innerHTML = PAGES.filter(p => !p[3]?.under && (!isStaff(p) || admin))
     .map(p => link(p, isStaff(p) ? 'staff-foot' : '')).join('');
   const cw = currentWeek('premier');
   $('#headerMeta').innerHTML = (cw
     ? `<a class="live-chip${cw.live ? ' live' : ''}" href="#schedule"><span class="dot" aria-hidden="true"></span><span class="live-label">${cw.live ? 'This weekend' : 'Up next'} · </span>Weekend ${pad2(cw.week.number)}<span class="live-date"> · ${esc(cw.week.date_label)}</span></a>`
-    : '') + (admin ? `<span class="staff-links">${PAGES.filter(isStaff).map(p => link(p, 'staff-link')).join('')}</span>` : '');
+    : '') + (admin ? `<span class="staff-links">${PAGES.filter(isStaff).map(p => link(p, 'staff-link')).join('')}</span>` : '') + `<span class="staff-links">${discordButton('staff-link')}</span>`;
   $('#headerMeta').classList.toggle('has-staff', admin);
   if (DESKTOP.matches) $('#nav .active')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   const { user, discord_login: discordLogin } = store.data.me;
@@ -73,6 +73,19 @@ function renderNav(active) {
   $('#footerAuth').innerHTML = [discord, admin
     ? '<span class="muted">Commissioner mode</span> · <button class="link-btn" data-logout>Log out</button>'
     : '<a class="muted" href="#game">Commissioner login</a>'].filter(Boolean).join(' · ');
+}
+
+// "Log in with Discord", or the logged-in person's name (a link to their profile, their waiting
+// claim, or the profile to claim). Top right on wide screens (cls 'staff-link', with a log out
+// button); at the end of the menu on phones ('staff-nav'; logging out is in the footer).
+function discordButton(cls) {
+  const { user, discord_login: enabled, player_id: mine, pending_id: pending, suggest_id: suggest } = store.data.me;
+  if (!user) return enabled ? `<a class="${cls}" href="/api/auth/discord">Log in with Discord</a>` : '';
+  const profile = mine || pending || suggest;
+  const title = mine ? 'Your profile' : pending ? 'Your profile claim is waiting for approval' : 'Claim your profile';
+  const name = profile ? `<a class="${cls}" href="#player/${profile}" title="${title}">${esc(user.name)}</a>` : '';
+  if (cls === 'staff-nav') return name;
+  return `${name || `<span class="${cls}">${esc(user.name)}</span>`} <button class="link-btn" data-discord-logout>Log out</button>`;
 }
 
 function render() {

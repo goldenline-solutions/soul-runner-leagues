@@ -61,13 +61,16 @@ export function normalizeBox(rows = []) {
 }
 
 // Discord tags are unique ignoring case (players_tag index on lower(discord_tag)).
-// steam: a tag that isn't anyone's Discord tag may still be a player's Steam tag (box scores).
+// steam: a tag that isn't anyone's Discord tag may still be a player's Steam tag or one of
+// their aliases (box scores).
 export async function playerIdForTag(db, tag, { steam = false } = {}) {
   if (steam) {
     const known = await db.get(`SELECT id FROM players WHERE lower(discord_tag) = lower(?)
       OR (steam_tag <> '' AND lower(steam_tag) = lower(?))
       ORDER BY (lower(discord_tag) = lower(?)) DESC, id LIMIT 1`, tag, tag, tag);
     if (known) return known.id;
+    const alias = await db.get('SELECT player_id FROM player_aliases WHERE lower(alias) = lower(?)', tag);
+    if (alias) return alias.player_id;
   }
   await db.run('INSERT INTO players (discord_tag) VALUES (?) ON CONFLICT ((lower(discord_tag))) DO NOTHING', tag);
   return (await db.get('SELECT id FROM players WHERE lower(discord_tag) = lower(?)', tag)).id;

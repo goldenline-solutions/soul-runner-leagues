@@ -103,7 +103,45 @@ export async function playerLog(db, id) {
     JOIN series s ON s.id = g.series_id
     LEFT JOIN weeks w ON w.id = s.week_id
     WHERE b.player_id = ? ORDER BY s.league_id, w.number, g.game_number`, id);
-  return { player, games };
+  const aliases = await db.all('SELECT id, alias FROM player_aliases WHERE player_id = ? ORDER BY lower(alias)', id);
+  return { player, games, aliases };
+}
+
+// ---------- aliases ----------
+// Other names a player goes by. The profile's owner (the Discord account it is linked to) and
+// the commissioner can change them. actor: { commissioner } or { commissioner: false, discordId }.
+
+const MAX_ALIASES = 10;
+
+async function ownProfile(db, playerId, actor) {
+  const player = await db.get('SELECT id, discord_tag, discord_id FROM players WHERE id = ?', playerId);
+  if (!player) throw new UserError('Player not found.', 404);
+  if (!actor.commissioner && player.discord_id !== actor.discordId) throw new UserError('You can only change your own profile. Claim it first.', 403);
+  return player;
+}
+
+export async function addAlias(db, playerId, actor, body) {
+  const player = await ownProfile(db, playerId, actor);
+  const alias = required(body.alias, 'Alias', 64);
+  // A name already in use points at someone: their tag, their Steam name, or one of their aliases.
+  const holder = await db.get(`SELECT p.id, p.discord_tag FROM players p
+    WHERE lower(p.discord_tag) = lower(?) OR (p.steam_tag <> '' AND lower(p.steam_tag) = lower(?))
+      OR EXISTS (SELECT 1 FROM player_aliases a WHERE a.player_id = p.id AND lower(a.alias) = lower(?))
+    ORDER BY p.id LIMIT 1`, alias, alias, alias);
+  if (holder) {
+    throw new UserError(holder.id === player.id ? `${alias} is already one of this profile's names.`
+      : `${alias} is already a name of ${holder.discord_tag}. If that is wrong, ask a commissioner.`, 409);
+  }
+  const { n } = await db.get('SELECT COUNT(*)::int AS n FROM player_aliases WHERE player_id = ?', playerId);
+  if (n >= MAX_ALIASES) throw new UserError(`A profile can have ${MAX_ALIASES} aliases. Remove one first.`, 409);
+  await db.run('INSERT INTO player_aliases (player_id, alias) VALUES (?, ?)', playerId, alias);
+  return { ok: true };
+}
+
+export async function removeAlias(db, playerId, actor, aliasId) {
+  await ownProfile(db, playerId, actor);
+  await db.run('DELETE FROM player_aliases WHERE id = ? AND player_id = ?', aliasId, playerId);
+  return { ok: true };
 }
 
 export async function awards(db, voter) {
@@ -344,7 +382,7 @@ export async function saveRules(db, body) {
 
 export const EXPORT_TABLES = ['leagues', 'teams', 'players', 'roster_slots', 'weeks', 'series', 'games', 'box_scores',
   'registrations', 'news', 'award_votes', 'settings', 'users', 'team_members', 'queue_entries', 'matches', 'match_results', 'scrim_box_scores',
-  'solo_matches', 'solo_queue_entries', 'solo_box_scores', 'roster_moves', 'team_staff', 'profile_claims'];
+  'solo_matches', 'solo_queue_entries', 'solo_box_scores', 'roster_moves', 'team_staff', 'profile_claims', 'player_aliases'];
 
 export async function exportAll(db) {
   const out = { exported_at: new Date().toISOString() };

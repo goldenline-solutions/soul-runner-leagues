@@ -290,6 +290,11 @@ Discord name. They can cancel a request or remove their own claim; a commissione
 claim from the player page. The bot gives a claimed account the roles
 that go with the record (team roles, free agent).
 
+**Aliases.** On their own (claimed) profile page a player adds the other names they play under:
+an old or new Steam name, an in-game name. The screenshot reader and the box score form match
+aliases the same way as the Discord and Steam tags, so a renamed player keeps one profile. A name
+can belong to one player only; up to 10 per profile. The commissioner can edit any profile's aliases.
+
 `npm start` uses `.env`, which may point at the live database. For a local look on a throwaway
 database, run `node server.js .env.preview` with a settings file that leaves `DATABASE_URL` blank.
 

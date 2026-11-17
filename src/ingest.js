@@ -191,23 +191,25 @@ export function fuzzRatio(a, b) {
 
 const AI_NAME = /^(ai( player)?|cpu|player ?\d*)$/i;
 
-// Order: exact Discord/Steam tag anywhere in the league, then a close match on the two teams'
-// rosters (roster: Set of player ids), then a very close match anywhere. taken: ids already
-// given to another row of this screenshot.
+// Every name a player goes by: Discord tag, Steam tag, and the aliases on their profile.
+const namesOf = p => [p.discord_tag, p.steam_tag, ...(p.aliases ?? [])].filter(Boolean);
+
+// Order: exact Discord/Steam tag or alias anywhere in the league, then a close match on the two
+// teams' rosters (roster: Set of player ids), then a very close match anywhere. taken: ids
+// already given to another row of this screenshot.
 export function matchPlayer(players, name, { roster = null, taken = null } = {}) {
   const target = normalizeName(name);
   if (!target) return null;
   const free = players.filter(p => !taken?.has(p.id));
   for (const p of free) {
-    if (normalizeName(p.discord_tag) === target || (p.steam_tag && normalizeName(p.steam_tag) === target)) {
+    if (namesOf(p).some(n => normalizeName(n) === target)) {
       return { player_id: p.id, tag: p.discord_tag, how: 'exact', score: 100 };
     }
   }
   const closest = (pool, threshold, how) => {
     let best = null;
     for (const p of pool) {
-      for (const candidate of [p.discord_tag, p.steam_tag]) {
-        if (!candidate) continue;
+      for (const candidate of namesOf(p)) {
         const score = fuzzRatio(target, normalizeName(candidate));
         if (score >= threshold && (!best || score > best.score)) best = { player_id: p.id, tag: p.discord_tag, how, score: Math.round(score) };
       }
@@ -248,6 +250,8 @@ function backfillThrees(lines, warnings) {
 export async function buildDraft(db, data, seriesId) {
   const warnings = [];
   const players = await db.all('SELECT id, discord_tag, steam_tag FROM players');
+  const byId = new Map(players.map(p => [p.id, p]));
+  for (const a of await db.all('SELECT player_id, alias FROM player_aliases')) (byId.get(a.player_id).aliases ??= []).push(a.alias);
   const rosterTeam = new Map((await db.all('SELECT player_id, team_id FROM roster_slots WHERE player_id IS NOT NULL'))
     .map(r => [r.player_id, r.team_id]));
 
