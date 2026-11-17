@@ -66,7 +66,9 @@ function renderNav(active) {
   const { user, discord_login: discordLogin } = store.data.me;
   // Team owners and captains log in with Discord to manage their own roster.
   const discord = user
-    ? `<span class="muted">Logged in as ${esc(user.name)}</span> · <button class="link-btn" data-discord-logout>Log out</button>`
+    ? `<span class="muted">Logged in as ${esc(user.name)}</span> · ${store.data.me.player_id ? `<a class="muted" href="#player/${store.data.me.player_id}">My profile</a> · `
+      : store.data.me.pending_id ? `<a class="muted" href="#player/${store.data.me.pending_id}">Profile claim waiting for approval</a> · `
+        : store.data.me.suggest_id ? `<a class="muted" href="#player/${store.data.me.suggest_id}">Claim your profile</a> · ` : ''}<button class="link-btn" data-discord-logout>Log out</button>`
     : discordLogin ? '<a class="muted" href="/api/auth/discord">Team owner login (Discord)</a>' : '';
   $('#footerAuth').innerHTML = [discord, admin
     ? '<span class="muted">Commissioner mode</span> · <button class="link-btn" data-logout>Log out</button>'
@@ -291,6 +293,16 @@ document.addEventListener('click', async e => {
   if (e.target.closest('[data-close]')) return $('#dialog').close();
   const edit = e.target.closest('[data-edit-team]');
   if (edit) return openRosterEditor(edit.dataset.editTeam);
+  const claim = e.target.closest('[data-claim], [data-unclaim]');
+  if (claim) {
+    try {
+      await api(`/api/players/${claim.dataset.claim || claim.dataset.unclaim}/claim`, { method: claim.dataset.claim ? 'POST' : 'DELETE' });
+      await refresh();
+    } catch (err) {
+      setMsg($('#claimMsg'), err.message, 'error');
+    }
+    return;
+  }
   const manage = e.target.closest('[data-manage-team]');
   if (manage) return openRosterManager(manage.dataset.manageTeam);
   if (e.target.closest('[data-discord-logout]')) {

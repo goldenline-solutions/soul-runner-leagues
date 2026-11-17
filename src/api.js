@@ -41,6 +41,12 @@ export async function bootstrap(db, { admin, userId = null, discordLogin = false
   const user = userId ? await db.get('SELECT discord_id, discord_name FROM users WHERE id = ?', userId) : null;
   // The teams this person owns or captains: they can manage those rosters on the site.
   const manages = user ? (await db.all('SELECT team_id FROM team_staff WHERE discord_id = ?', user.discord_id)).map(r => r.team_id) : [];
+  // Their claimed profile, or (before claiming) an unclaimed record with their Discord name to suggest.
+  const claimed = user ? await db.get('SELECT id FROM players WHERE discord_id = ?', user.discord_id) : null;
+  const pending = user && !claimed
+    ? await db.get("SELECT player_id FROM profile_claims WHERE discord_id = ? AND status = 'pending'", user.discord_id) : null;
+  const suggest = user && !claimed && !pending
+    ? await db.get('SELECT id FROM players WHERE discord_id IS NULL AND lower(discord_tag) = lower(?)', user.discord_name) : null;
   const [leagues, teams, roster, weeks, series, games, players, news, allstar, rules] = await Promise.all([
     db.all('SELECT * FROM leagues ORDER BY sort'),
     db.all('SELECT * FROM teams ORDER BY name'),
@@ -58,7 +64,10 @@ export async function bootstrap(db, { admin, userId = null, discordLogin = false
   ]);
   return {
     leagues, teams, roster, weeks, series, games, players, news, allstar, rules,
-    me: { admin, user: user ? { name: user.discord_name } : null, manages, discord_login: discordLogin },
+    me: {
+      admin, user: user ? { name: user.discord_name } : null, manages, discord_login: discordLogin,
+      player_id: claimed?.id ?? null, pending_id: pending?.player_id ?? null, suggest_id: suggest?.id ?? null,
+    },
   };
 }
 
@@ -335,7 +344,7 @@ export async function saveRules(db, body) {
 
 export const EXPORT_TABLES = ['leagues', 'teams', 'players', 'roster_slots', 'weeks', 'series', 'games', 'box_scores',
   'registrations', 'news', 'award_votes', 'settings', 'users', 'team_members', 'queue_entries', 'matches', 'match_results', 'scrim_box_scores',
-  'solo_matches', 'solo_queue_entries', 'solo_box_scores', 'roster_moves', 'team_staff'];
+  'solo_matches', 'solo_queue_entries', 'solo_box_scores', 'roster_moves', 'team_staff', 'profile_claims'];
 
 export async function exportAll(db) {
   const out = { exported_at: new Date().toISOString() };

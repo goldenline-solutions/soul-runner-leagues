@@ -241,6 +241,72 @@ export async function siteSlot(db, { teamId, playerId, slot, actor }) {
   });
 }
 
+// ---------- profile claims ----------
+// Someone logged in with Discord on the site says "this player record is me". One profile per
+// Discord account, one account per profile. The request waits in profile_claims until a
+// commissioner approves it; from then on the record is linked exactly as with /roster link.
+
+// Refuses a claim that can never stand: the record or the account is already taken.
+async function claimable(t, discordId, playerId) {
+  const target = await t.get('SELECT * FROM players WHERE id = ?', playerId);
+  if (!target) throw new UserError('Player not found.', 404);
+  if (target.discord_id === String(discordId)) throw new UserError(`${target.discord_tag} is already this account's profile.`, 409);
+  if (target.discord_id) throw new UserError(`${target.discord_tag} is already claimed by another Discord account. If that is wrong, ask a commissioner.`, 409);
+  const own = await t.get('SELECT discord_tag FROM players WHERE discord_id = ?', String(discordId));
+  if (own) throw new UserError(`This account already has the profile ${own.discord_tag}. Remove that claim first: one profile per account.`, 409);
+}
+
+// Asks for a profile. A newer request replaces the account's earlier open one.
+export async function requestClaim(db, { discordId, discordName, playerId }) {
+  return db.tx(async t => {
+    await t.get(LOCK);
+    await claimable(t, discordId, playerId);
+    await t.run("DELETE FROM profile_claims WHERE discord_id = ? AND status = 'pending'", String(discordId));
+    await t.run('INSERT INTO profile_claims (player_id, discord_id, discord_name) VALUES (?, ?, ?)', playerId, String(discordId), String(discordName).slice(0, 64));
+    return { ok: true, status: 'pending' };
+  });
+}
+
+// A commissioner approves (the record is linked, and the bot gives the account its roles) or rejects.
+export async function decideClaim(db, { claimId, approve }) {
+  return db.tx(async t => {
+    await t.get(LOCK);
+    const claim = await t.get("SELECT * FROM profile_claims WHERE id = ? AND status = 'pending'", claimId);
+    if (!claim) throw new UserError('That claim is no longer waiting.', 404);
+    if (approve) {
+      await claimable(t, claim.discord_id, claim.player_id);
+      await t.run('UPDATE players SET discord_id = ? WHERE id = ?', claim.discord_id, claim.player_id);
+      await t.run("INSERT INTO roster_moves (player_id, discord_id, action, source) VALUES (?, ?, 'claim', 'site')", claim.player_id, claim.discord_id);
+    }
+    await t.run('UPDATE profile_claims SET status = ?, decided_at = now() WHERE id = ?', approve ? 'approved' : 'rejected', claimId);
+    return { ok: true };
+  });
+}
+
+// Takes back one's own open request. Returns whether there was one.
+export const cancelClaim = async (db, { discordId, playerId }) => Boolean(await db.get(
+  "DELETE FROM profile_claims WHERE discord_id = ? AND player_id = ? AND status = 'pending' RETURNING id", String(discordId), playerId));
+
+export const pendingClaims = db => db.all(`SELECT c.id, c.player_id, p.discord_tag AS tag, c.discord_id, c.discord_name, c.created_at
+  FROM profile_claims c JOIN players p ON p.id = c.player_id WHERE c.status = 'pending' ORDER BY c.id`);
+
+// Removes a claim: by the person who made it, or by a commissioner (a wrong claim).
+export async function unclaimProfile(db, { playerId, actor }) {
+  return db.tx(async t => {
+    await t.get(LOCK);
+    const target = await t.get('SELECT * FROM players WHERE id = ?', playerId);
+    if (!target?.discord_id) throw new UserError('This profile is not claimed.', 404);
+    if (limited(actor) && target.discord_id !== String(actor.discordId)) throw new UserError('Only a commissioner can remove someone else\'s claim.', 403);
+    await t.run('UPDATE players SET discord_id = NULL WHERE id = ?', playerId);
+    // One log row per team they were on, so the bot takes those team roles off the old account.
+    const spots = await spotsOf(t, playerId);
+    for (const teamId of spots.length ? spots.map(s => s.team_id) : [null]) {
+      await t.run("INSERT INTO roster_moves (player_id, discord_id, action, from_team_id, source) VALUES (?, ?, 'claim', ?, 'site')", playerId, target.discord_id, teamId);
+    }
+    return { ok: true };
+  });
+}
+
 // Moves the bot has not handled yet, oldest first, with what it needs to post them.
 export const movesToPost = db => db.all(`SELECT m.id, m.action, m.source, m.from_team_id, m.to_team_id,
     p.discord_tag AS tag, COALESCE(m.discord_id, p.discord_id) AS discord_id, p.free_agent,

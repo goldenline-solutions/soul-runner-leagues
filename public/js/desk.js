@@ -15,6 +15,12 @@ export function desk() {
   return `<div class="panel"><h2>Commissioner's Desk</h2>
     <p>Everything here is private to the commissioner. Scores and box scores live in <a href="#game">Upload Results</a>; rosters are edited from each team's card (pick a team in <a href="#premier">Premier Teams</a> or <a href="#affiliate">Affiliate Teams</a>).</p>
 
+    <section class="registration-section"><h3>Profile claims</h3>
+      <p class="muted">People logged in with Discord who say a player profile is theirs. Approving links the profile to that Discord account, and the bot gives the account its roles.</p>
+      <div id="claimList" class="reg-list"><p class="muted">Loading…</p></div>
+      <p class="msg" id="claimDeskMsg" role="status"></p>
+    </section>
+
     <section class="registration-section"><h3>Registrations</h3>
       <div class="toolbar"><label>Show <select data-reg-filter>
         ${['new', 'approved', 'archived', 'all'].map(f => `<option value="${f}" ${f === filter ? 'selected' : ''}>${f[0].toUpperCase() + f.slice(1)}</option>`).join('')}
@@ -100,6 +106,16 @@ desk.after = async el => {
       await store.refresh();
       return;
     }
+    const claim = t.closest('[data-claim-decide]');
+    if (claim) {
+      try {
+        await api(`/api/admin/claims/${claim.dataset.id}/${claim.dataset.claimDecide}`, { method: 'POST' });
+        await store.refresh();
+      } catch (err) {
+        setMsg($('#claimDeskMsg', el), err.message, 'error');
+      }
+      return;
+    }
     const delNews = t.closest('[data-del-news]');
     if (delNews && confirm('Delete this post?')) {
       await api(`/api/admin/news/${delNews.dataset.delNews}`, { method: 'DELETE' });
@@ -137,8 +153,19 @@ desk.after = async el => {
       setMsg(msg, err.message, 'error');
     }
   });
+  await loadClaims(el);
   await loadRegistrations(el);
 };
+
+async function loadClaims(el) {
+  const list = await api('/api/admin/claims');
+  $('#claimList', el).innerHTML = list.length ? list.map(c => `<article class="reg-card">
+      <strong>${esc(c.discord_name)}</strong> <span class="muted small">(Discord id ${esc(c.discord_id)})</span> says they are
+      <a href="#player/${c.player_id}">${esc(c.tag)}</a> <span class="muted small">· ${esc(String(c.created_at).slice(0, 10))}</span><br>
+      <button class="btn-small" data-claim-decide="approve" data-id="${c.id}">Approve</button>
+      <button class="btn-ghost btn-small" data-claim-decide="reject" data-id="${c.id}">Reject</button>
+    </article>`).join('') : '<p class="muted">No claims waiting.</p>';
+}
 
 async function loadRegistrations(el) {
   const list = (await api('/api/admin/registrations')).filter(r => filter === 'all' || r.status === filter);

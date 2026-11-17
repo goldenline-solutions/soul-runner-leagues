@@ -118,6 +118,21 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
     ['POST', /^\/api\/teams\/(\d+)\/roster\/release$/, async ctx => roster.siteRelease(db, { teamId: id(ctx.params[0]), playerId: id(ctx.body.player_id), actor: await ctx.actor() })],
     ['POST', /^\/api\/teams\/(\d+)\/roster\/slot$/, async ctx => roster.siteSlot(db, { teamId: id(ctx.params[0]), playerId: id(ctx.body.player_id), slot: ctx.body.slot, actor: await ctx.actor() })],
 
+    // Profile claims: the Discord account logged in here says a player record is theirs.
+    // A commissioner approves each request in the Commissioner's Desk.
+    ['POST', /^\/api\/players\/(\d+)\/claim$/, async ctx => {
+      const user = await ctx.discordUser();
+      return roster.requestClaim(db, { playerId: id(ctx.params[0]), discordId: user.discord_id, discordName: user.discord_name });
+    }],
+    // Takes back one's own open request, or removes a claim that already stands.
+    ['DELETE', /^\/api\/players\/(\d+)\/claim$/, async ctx => {
+      const actor = await ctx.actor(), playerId = id(ctx.params[0]);
+      if (!actor.commissioner && await roster.cancelClaim(db, { discordId: actor.discordId, playerId })) return { ok: true };
+      return roster.unclaimProfile(db, { playerId, actor });
+    }],
+    ['GET', /^\/api\/admin\/claims$/, () => roster.pendingClaims(db), { admin: true }],
+    ['POST', /^\/api\/admin\/claims\/(\d+)\/(approve|reject)$/, ctx => roster.decideClaim(db, { claimId: id(ctx.params[0]), approve: ctx.params[1] === 'approve' }), { admin: true }],
+
     // Scrim queue. The same src/scrim.js functions the Discord bot calls; the bot's 30 second tick
     // opens the match thread for anything matched from here.
     ['GET', /^\/api\/queue$/, async () => ({ entries: await scrim.listQueue(db) })],
@@ -180,11 +195,12 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
         return userId;
       },
       // Who is changing a roster: the commissioner, or the Discord account logged in here.
-      actor: async () => {
-        if (admin) return { commissioner: true };
-        const user = await db.get('SELECT discord_id FROM users WHERE id = ?', ctx.user());
+      actor: async () => (admin ? { commissioner: true } : { commissioner: false, discordId: (await ctx.discordUser()).discord_id }),
+      // The Discord account logged in on this browser.
+      discordUser: async () => {
+        const user = await db.get('SELECT discord_id, discord_name FROM users WHERE id = ?', ctx.user());
         if (!user) throw new UserError('Log in with Discord first.', 401);
-        return { commissioner: false, discordId: user.discord_id };
+        return user;
       },
       // Vercel sets x-real-ip / x-forwarded-for itself, so clients can't spoof them there.
       ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown',

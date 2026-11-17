@@ -105,7 +105,7 @@ test('an owner logged in with Discord manages their own roster on the site, with
 
   // The site knows which team they run.
   const me = (await api.bootstrap(db, { admin: false, userId: user.id, discordLogin: true })).me;
-  assert.deepEqual(me, { admin: false, user: { name: 'olive' }, manages: [mine.id], discord_login: true });
+  assert.deepEqual(me, { admin: false, user: { name: 'olive' }, manages: [mine.id], discord_login: true, player_id: null, pending_id: null, suggest_id: null });
   assert.deepEqual((await api.bootstrap(db, { admin: false })).me.manages, []);
 
   await roster.addFreeAgent(db, { member: { id: '111', name: 'ann' } });
@@ -132,4 +132,55 @@ test('an owner logged in with Discord manages their own roster on the site, with
   // Logged as site moves by this owner, so the bot applies the roles in Discord.
   const moves = await db.all("SELECT action, source FROM roster_moves WHERE by_discord_id = '500' ORDER BY id");
   assert.deepEqual(moves, [{ action: 'sign', source: 'site' }, { action: 'release', source: 'site' }]);
+});
+
+test('a Discord account claims one profile on the site, and the bot gives it the roles', async () => {
+  const db = await connectLocal();
+  const team = await db.get("SELECT id, name FROM teams WHERE league_id = 'premier' ORDER BY id LIMIT 1");
+  await roster.setTeamRole(db, team.id, 'team-role');
+  await api.updateTeam(db, team.id, { roster: { PG: 'Olive', SG: 'Other' } });
+  const id = async tag => (await db.get('SELECT id FROM players WHERE discord_tag = ?', tag)).id;
+  const [olive, other] = [await id('Olive'), await id('Other')];
+  const user = await db.get("INSERT INTO users (discord_id, discord_name) VALUES ('500', 'olive') RETURNING id");
+
+  // Before claiming, the site suggests the record with their Discord name.
+  assert.equal((await api.bootstrap(db, { admin: false, userId: user.id })).me.suggest_id, olive);
+
+  // The request waits for a commissioner. Asking for another profile replaces it; it can be taken back.
+  await roster.requestClaim(db, { discordId: '500', discordName: 'olive', playerId: other });
+  await roster.requestClaim(db, { discordId: '500', discordName: 'olive', playerId: olive });
+  let me = (await api.bootstrap(db, { admin: false, userId: user.id })).me;
+  assert.deepEqual([me.player_id, me.pending_id, me.suggest_id], [null, olive, null]);
+  assert.equal(await roster.cancelClaim(db, { discordId: '500', playerId: olive }), true);
+  assert.equal(await roster.cancelClaim(db, { discordId: '500', playerId: olive }), false);
+  await roster.requestClaim(db, { discordId: '500', discordName: 'olive', playerId: olive });
+  await roster.requestClaim(db, { discordId: '777', discordName: 'faker', playerId: olive }); // someone else wants it too
+
+  const [first, second] = await roster.pendingClaims(db);
+  assert.deepEqual([first.tag, first.discord_name, second.discord_name], ['Olive', 'olive', 'faker']);
+  await roster.decideClaim(db, { claimId: first.id, approve: true });
+  await assert.rejects(roster.decideClaim(db, { claimId: first.id, approve: true }), /no longer waiting/);
+  await assert.rejects(roster.decideClaim(db, { claimId: second.id, approve: true }), /already claimed by another Discord account/);
+  await roster.decideClaim(db, { claimId: second.id, approve: false });
+  assert.deepEqual(await roster.pendingClaims(db), []);
+
+  me = (await api.bootstrap(db, { admin: false, userId: user.id })).me;
+  assert.deepEqual([me.player_id, me.pending_id], [olive, null]);
+  await assert.rejects(roster.requestClaim(db, { discordId: '500', discordName: 'olive', playerId: other }), /already has the profile Olive.*one profile per account/);
+
+  // The bot gives the claimed account the team role.
+  const roles = [];
+  const guild = { members: { addRole: async ({ user: u, role }) => { roles.push(`+${role} ${u}`); }, removeRole: async ({ user: u, role }) => { roles.push(`-${role} ${u}`); } } };
+  const client = { guilds: { cache: new Map([['g1', guild]]) }, channels: { fetch: async () => ({ send: async () => {} }) } };
+  await postMoves(client, { db, guildId: 'g1' });
+  assert.deepEqual(roles, ['+team-role 500', '+team-role 500']); // once for the signing typed earlier, once for the claim
+
+  // Only they or a commissioner can remove the claim; the team role comes off the account.
+  roles.length = 0;
+  await assert.rejects(roster.unclaimProfile(db, { playerId: olive, actor: { commissioner: false, discordId: '777' } }), /Only a commissioner/);
+  await roster.unclaimProfile(db, { playerId: olive, actor: { commissioner: false, discordId: '500' } });
+  await postMoves(client, { db, guildId: 'g1' });
+  assert.deepEqual(roles, ['-team-role 500']);
+  assert.equal((await api.bootstrap(db, { admin: false, userId: user.id })).me.player_id, null);
+  await assert.rejects(roster.unclaimProfile(db, { playerId: olive, actor: { commissioner: true } }), /not claimed/);
 });

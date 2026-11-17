@@ -282,6 +282,14 @@ dialog) then gets a **Manage Roster** button on that team's page, with the same 
 empty slot. Trades, staff changes and signing someone who is not a free agent stay with the
 commissioner. The bot applies the Discord roles for these changes like any other site change.
 
+**Profile claims.** Anyone logged in with Discord can open a player page and press **This is me:
+claim this profile**. The request waits under **Profile claims** in the Commissioner's Desk.
+Approving it links the player record to that Discord account, the same as `/roster link`: one
+profile per account, one account per profile. The footer suggests the record that carries their
+Discord name. They can cancel a request or remove their own claim; a commissioner can remove any
+claim from the player page. The bot gives a claimed account the roles
+that go with the record (team roles, free agent).
+
 `npm start` uses `.env`, which may point at the live database. For a local look on a throwaway
 database, run `node server.js .env.preview` with a settings file that leaves `DATABASE_URL` blank.
 

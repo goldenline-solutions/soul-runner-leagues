@@ -501,6 +501,20 @@ export function player() {
   return '<div class="panel" id="playerPanel"><p class="muted">Loading player…</p></div>';
 }
 
+// Who this profile belongs to, and the claim / remove-claim control for whoever is looking.
+function claimLine(playerId) {
+  const { me, players } = store.data;
+  const linked = players.find(x => x.id === playerId)?.linked;
+  const remove = `<button class="link-btn" data-unclaim="${playerId}">Remove claim</button>`;
+  let line = '';
+  if (me.player_id === playerId) line = `This is your profile. ${remove}`;
+  else if (me.pending_id === playerId && !linked) line = `Claim sent. A commissioner has to approve it. <button class="link-btn" data-unclaim="${playerId}">Cancel request</button>`;
+  else if (linked) line = `Claimed profile${me.admin ? ` · ${remove}` : ''}`;
+  else if (me.user && !me.player_id) line = `<button data-claim="${playerId}">This is me: claim this profile</button>`;
+  else if (!me.user && me.discord_login) line = '<a href="/api/auth/discord">Log in with Discord</a> to claim this profile if it is yours.';
+  return `<p class="muted">${line}</p><p class="msg" id="claimMsg" role="status"></p>`;
+}
+
 player.after = async (el, id) => {
   const { player: p, games } = await api(`/api/players/${id}`);
   const n = games.length;
@@ -508,6 +522,7 @@ player.after = async (el, id) => {
   const sum = k => games.reduce((t, g) => t + g[k], 0);
   $('#playerPanel', el).innerHTML = `
     <h2>${esc(p.tag)}</h2>
+    ${claimLine(Number(id))}
     <div class="stats">
       <div class="stat"><strong>${n}</strong><span>GAMES</span></div>
       <div class="stat"><strong>${avg('pts')}</strong><span>POINTS PER GAME</span></div>
