@@ -133,6 +133,20 @@ back after a reboot with the rest of the pm2 list. After changing bot code: `pm2
 Logs: `pm2 logs soulrunner-bot`. Don't also start `npm run bot` in a terminal: two copies would
 both answer.
 
+**A second bot for testing.** `npm run bot:test` runs the same code from `.env.test` instead of
+`.env`, so new commands can be tried in a test server without touching the league's data:
+
+1. Developer portal → **New Application** (a separate one, for example "Soul Runner Test") → **Bot**
+   → **Reset Token**. Turn on **Server Members Intent** there too.
+2. In `.env.test`, set `DISCORD_TOKEN` to that token and `DISCORD_GUILD_ID` to the test server's id.
+   Leave `DATABASE_URL` blank: the test bot then keeps its own database in `data/pglite-test`
+   (`LOCAL_DB_DIR`), seeded with sample teams. Channel and role ids are the test server's, not the
+   league's.
+3. `npm run bot:test`, open the invite link it prints, add the test bot to the test server.
+
+The two bots are separate Discord applications, so both can run at once. Never put the live token
+or the live `DATABASE_URL` in `.env.test`.
+
 New bot features go in `bot/` as a file exporting `{ commands, names, handle }`, added to
 `FEATURES` in `bot/index.js`. A feature with buttons or forms also exports `prefix` (the start of
 its component ids), and one that needs a timer exports `start(client, ctx)`.

@@ -19,10 +19,13 @@ const FEATURES = [boxscore, scrim, solo, roster];
 // threads), plus Manage Roles for the roster commands.
 const PERMISSIONS = P.ManageRoles | P.ViewChannel | P.SendMessages | P.EmbedLinks | P.PinMessages | P.CreatePrivateThreads | P.SendMessagesInThreads | P.ManageThreads;
 
-loadEnv();
+// `node bot/index.js .env.test` runs a second bot from another settings file (npm run bot:test):
+// its own Discord application, server and database. Only that file is read, never .env as well.
+const envFile = process.argv[2] || '.env';
+loadEnv(resolve(root, envFile));
 const env = process.env;
 if (!env.DISCORD_TOKEN) {
-  console.error('DISCORD_TOKEN is not set. Add the bot token to .env (see the Discord bot section of README.md).');
+  console.error(`DISCORD_TOKEN is not set. Add the bot token to ${envFile} (see the Discord bot section of README.md).`);
   process.exit(1);
 }
 
@@ -44,8 +47,8 @@ if (!ctx.ingest.apiKey) console.warn('OPENAI_API_KEY is not set: /boxscore will 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async c => {
-  console.log(`Logged in as ${c.user.tag}.`);
-  console.log(env.DATABASE_URL ? 'Database: PostgreSQL (DATABASE_URL)' : 'Database: embedded Postgres in data/pglite');
+  console.log(`Logged in as ${c.user.tag} (settings: ${envFile}).`);
+  console.log(env.DATABASE_URL ? 'Database: PostgreSQL (DATABASE_URL)' : `Database: embedded Postgres in ${env.LOCAL_DB_DIR || 'data/pglite'}`);
   console.log(`Invite link: https://discord.com/oauth2/authorize?client_id=${c.application.id}&scope=bot+applications.commands&permissions=${PERMISSIONS}`);
   await registerCommands(c);
   for (const f of FEATURES) f.start?.(c, ctx);

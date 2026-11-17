@@ -9,6 +9,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "bot": "node bot/index.js",
+    "bot:test": "node bot/index.js .env.test",
     "test": "node --test test/*.test.js",
     "db:setup": "node scripts/db-setup.js",
     "db:sql": "node scripts/db-sql.js",
