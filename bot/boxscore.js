@@ -61,7 +61,7 @@ function sideTable(label, score, lines) {
 export function formatReading(r, { siteUrl = '' } = {}) {
   const site = siteUrl.replace(/\/$/, '');
   if (r.duplicate_game_id && !r.lines) {
-    return `This exact screenshot is already saved as a game.${site ? ` ${site}/#box/${r.duplicate_game_id}` : ''}`;
+    return `This exact screenshot is already saved as ${r.duplicate?.text ?? 'a game'}.${site ? ` ${site}/#box/${r.duplicate_game_id}` : ''}`;
   }
   const side = s => r.lines.filter(l => l.side === s);
   const sr = r.series; // the matchup worked out from the players, when there is one

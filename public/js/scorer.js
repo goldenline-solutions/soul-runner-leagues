@@ -48,12 +48,32 @@ document.addEventListener('paste', e => {
 
 function loginPanel() {
   return `<div class="panel"><h2>Upload Results</h2>
-    <p>Upload Results is for the league commissioner. Log in to record scores, read box score screenshots and manage the league.</p>
+    <p>Upload Results is for league commissioners. Log in to record scores, read box score screenshots and manage the league.</p>
+    ${discordAccess()}
     <form id="loginForm" class="stack">
       <label>Commissioner password<input type="password" name="password" required autocomplete="current-password"></label>
-      <button>Log in</button>
+      <button${store.data.me.role_login ? ' class="btn-ghost"' : ''}>Log in with the password</button>
       <p class="msg" role="status"></p>
     </form></div>`;
+}
+
+// Commissioner access comes from the Commissioner role in the league's Discord server. This block
+// says where the visitor stands: not logged in, logged in without the role, or roles out of date.
+function discordAccess() {
+  const { me } = store.data;
+  if (!me.role_login) return '';
+  const login = label => `<a class="promo-link" href="/api/auth/discord">${label}</a>`;
+  if (!me.user) {
+    return `<div class="login-discord">${login('Log in with Discord')}
+      <p class="muted">Members with the Commissioner role in the league's Discord server get commissioner access. Team owners log in the same way to manage their roster.</p>
+      <p class="login-or muted">or</p></div>`;
+  }
+  return `<div class="login-discord">
+    <p class="msg error">${me.roles_expired
+    ? `${esc(me.user.name)}, your Discord roles were last checked over 12 hours ago. Log in again to renew your access.`
+    : `${esc(me.user.name)} is logged in, but does not have the Commissioner role in the league's Discord server. If you were just given the role, log in again.`}</p>
+    ${login('Log in with Discord again')}
+    <p class="login-or muted">or</p></div>`;
 }
 
 function wireLogin(el) {
@@ -461,7 +481,8 @@ async function fitForUpload(file) {
   throw new Error('That screenshot is too large to upload. Crop it to the box score and try again.');
 }
 
-async function readScreenshot(el, file) {
+// force: read it even though this exact image is already attached to a saved game.
+async function readScreenshot(el, file, force = false) {
   const out = $('#shotResult', el);
   if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
     out.innerHTML = '<p class="msg error">Use a PNG, JPG, WebP or GIF screenshot.</p>';
@@ -471,13 +492,18 @@ async function readScreenshot(el, file) {
     out.innerHTML = '<p class="msg error">That screenshot is over 40 MB. Save it as a JPG and try again.</p>';
     return;
   }
-  out.innerHTML = '<p class="msg">Reading the screenshot… this usually takes 10 to 30 seconds.</p>';
+  out.innerHTML = '<p class="msg">Reading the screenshot… this usually takes 15 to 60 seconds, and stops by itself after 3 minutes.</p>';
   $('#dropzone', el)?.classList.remove('drag');
   try {
     const image = await fitForUpload(file);
-    const r = await api('/api/admin/ingest', { method: 'POST', body: { image, series_id: S.seriesId } });
+    const r = await api('/api/admin/ingest', { method: 'POST', body: { image, series_id: S.seriesId, force } });
+    const where = r.duplicate ? esc(r.duplicate.text) : 'a recorded game';
     if (r.duplicate_game_id && !r.lines) {
-      out.innerHTML = `<p class="msg error">This exact screenshot is already saved. <a href="#box/${r.duplicate_game_id}">Open that box score</a>.</p>`;
+      // Says which game holds this picture, and leaves a way through if that is not the whole story.
+      out.innerHTML = `<p class="msg error">This exact screenshot file is already saved as <a href="#box/${r.duplicate_game_id}">${where}</a>, so it was not read again.</p>
+        <p class="muted">A different game needs its own screenshot: check that you picked the right file. If this picture was saved under the wrong game, or you do need it here,
+          <button type="button" class="link-btn" id="forceShot">read it into this game anyway</button>.</p>`;
+      $('#forceShot', out).onclick = () => readScreenshot(el, file, true);
       return;
     }
     S.shotUrl = URL.createObjectURL(file);
@@ -493,7 +519,7 @@ async function readScreenshot(el, file) {
     }
     renderBody(el);
     if (r.duplicate_game_id) {
-      $('#shotResult', el).insertAdjacentHTML('afterbegin', `<p class="msg error">Looks like a game already on record: <a href="#box/${r.duplicate_game_id}">compare with that box score</a>.</p>`);
+      $('#shotResult', el).insertAdjacentHTML('afterbegin', `<p class="msg error">Looks like a game already on record: <a href="#box/${r.duplicate_game_id}">${where}</a>. Compare the two; you can still save this one.</p>`);
     }
   } catch (err) {
     out.innerHTML = `<p class="msg error">${esc(err.message)}</p>`;

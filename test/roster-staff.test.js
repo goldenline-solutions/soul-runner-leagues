@@ -68,7 +68,7 @@ test('staff keep the team role when they leave the roster; Owner and Captain rol
   assert.deepEqual((await roster.teamRoster(db, b.id)).staff.map(s => [s.discord_name, s.role]), [['cap', 'owner']]);
 });
 
-test('/roster in Discord: commissioner role, captain limits, staff roles', async () => {
+test('/roster in Discord: commissioner role, owner limits, staff roles', async () => {
   const { db, a, b } = await setup();
   const calls = [];
   const guild = { members: {
@@ -101,7 +101,20 @@ test('/roster in Discord: commissioner role, captain limits, staff roles', async
   assert.deepEqual(calls.splice(0), ['700+role-a', '700-owner-role', '700+captain-role']);
   assert.match(await run({ id: '1', name: 'nobody' }, 'view', { team: String(a.id) }), /Owner: - · Captain: <@700>/);
 
-  // The captain: free agents only, own team only, no commissioner commands.
+  // A captain does not get the roster commands in Discord: owners and commissioners only.
+  assert.match(await run(captain, 'sign', { team: String(a.id), user: user(bob), holds: ['fa-role'] }), /a team you own, and .* is not one/);
+  // Someone with the Owner role and the team's role is an owner of that team, with nothing set by hand.
+  const byRole = { id: '800', name: 'roley', roles: ['owner-role', 'role-b'] };
+  assert.match(await run(byRole, 'sign', { team: String(a.id), user: user(bob), holds: ['fa-role'] }), /is not one/);
+  assert.match(await run(byRole, 'sign', { team: String(b.id), user: user(bob), holds: ['fa-role'] }), /<@222> signed with/);
+  assert.match(await run(byRole, 'release', { user: user(bob) }), /released by/);
+  assert.match(await run({ id: '801', name: 'teamless', roles: ['owner-role'] }, 'sign', { team: String(b.id), user: user(bob), holds: ['fa-role'] }), /is not one/);
+  assert.match(await run({ id: '802', name: 'player', roles: ['role-b'] }, 'sign', { team: String(b.id), user: user(bob), holds: ['fa-role'] }), /is not one/);
+  // From here on the test member is an owner of team a, made one with /roster staff.
+  assert.match(await run(commish, 'staff', { team: String(a.id), user: user(cap), position: 'owner' }), /<@700> is now an owner of/);
+  calls.splice(0);
+
+  // The owner: free agents only, own team only, no commissioner commands.
   assert.match(await run(captain, 'sign', { team: String(a.id), user: user(ann) }), /not a free agent/);
   // Holding the free agent role is enough, even though nobody ran /roster freeagent for bob.
   assert.match(await run(captain, 'sign', { team: String(a.id), user: user(bob), holds: ['fa-role'] }), /<@222> signed with/);

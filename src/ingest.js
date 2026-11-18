@@ -24,23 +24,42 @@ export function ingestConfig(env) {
 
 // ---------- model calls ----------
 
-async function callModel(cfg, dataUrl, prompt, name, schema) {
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-    signal: AbortSignal.timeout(120e3),
-    body: JSON.stringify({
-      model: cfg.model,
-      // Reasoning models (gpt-5, o-series) only accept the default temperature.
-      ...(/^(gpt-5|o\d)/.test(cfg.model) ? { reasoning_effort: cfg.reasoningEffort } : { temperature: 0 }),
-      response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
-      messages: [{
-        role: 'user',
-        content: [{ type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }, { type: 'text', text: prompt }],
-      }],
-    }),
-  });
-  const body = await res.json().catch(() => ({}));
+// Time limits. A reading is one validation call and one extraction call side by side, plus at
+// most one corrective re-read. Each call gets CALL_TIMEOUT_MS; the whole reading gets BUDGET_MS,
+// which stays well inside the host's request limit (Vercel: 300 s), so a slow model gives a clear
+// message, or the first reading with its warnings, and never a dead request.
+const CALL_TIMEOUT_MS = 90e3;
+const BUDGET_MS = 170e3;
+const RETRY_NEEDS_MS = 40e3; // a corrective re-read is skipped when less than this is left
+
+const timedOut = err => err?.name === 'TimeoutError' || err?.name === 'AbortError';
+const slowMessage = 'the model took too long to answer';
+
+async function callModel(cfg, dataUrl, prompt, name, schema, deadline = Date.now() + CALL_TIMEOUT_MS) {
+  const left = Math.min(CALL_TIMEOUT_MS, deadline - Date.now());
+  if (left < 3e3) throw Object.assign(new Error(slowMessage), { timeout: true });
+  let res, body;
+  try {
+    res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      signal: AbortSignal.timeout(left),
+      body: JSON.stringify({
+        model: cfg.model,
+        // Reasoning models (gpt-5, o-series) only accept the default temperature.
+        ...(/^(gpt-5|o\d)/.test(cfg.model) ? { reasoning_effort: cfg.reasoningEffort } : { temperature: 0 }),
+        response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
+        messages: [{
+          role: 'user',
+          content: [{ type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }, { type: 'text', text: prompt }],
+        }],
+      }),
+    });
+    body = await res.json().catch(() => ({}));
+  } catch (err) {
+    if (timedOut(err)) throw Object.assign(new Error(slowMessage), { timeout: true });
+    throw err;
+  }
   if (!res.ok) {
     const err = new Error(body?.error?.message || `Model API returned ${res.status}`);
     err.status = res.status;
@@ -49,11 +68,13 @@ async function callModel(cfg, dataUrl, prompt, name, schema) {
   return JSON.parse(body.choices[0].message.content);
 }
 
-async function validateScreenshot(cfg, dataUrl) {
+async function validateScreenshot(cfg, dataUrl, deadline) {
   let v;
   try {
-    v = await callModel(cfg, dataUrl, VALIDATION_PROMPT, 'ScreenshotValidation', VALIDATION_SCHEMA);
+    v = await callModel(cfg, dataUrl, VALIDATION_PROMPT, 'ScreenshotValidation', VALIDATION_SCHEMA, deadline);
   } catch (err) {
+    // A slow validation call says nothing about the image: let the extraction decide.
+    if (err.timeout) return;
     throw new UserError("Unable to validate screenshot. Please ensure you're uploading a valid NBA 2K 5v5 box score screenshot. " +
       `Validation error: ${err.message}`);
   }
@@ -72,19 +93,33 @@ async function validateScreenshot(cfg, dataUrl) {
     'Please upload a screenshot from the game stats screen showing player statistics, team scores, and game information.');
 }
 
-export async function extractBoxScore(cfg, dataUrl, { retryOnError = true, feedback = null } = {}) {
-  if (cfg.validate) await validateScreenshot(cfg, dataUrl);
+// One reading of the image. validate: also check that it is a 2K box score, at the same time as
+// the extraction (not before it), so the check adds no waiting. Corrective re-reads pass
+// validate: false: the image was already checked.
+export async function extractBoxScore(cfg, dataUrl, { retryOnError = true, feedback = null, validate = !feedback, deadline = Date.now() + BUDGET_MS } = {}) {
   const instruction = feedback ? feedbackPrompt(feedback) : EXTRACTION_PROMPT;
+  const check = cfg.validate && validate ? validateScreenshot(cfg, dataUrl, deadline) : null;
+  check?.catch(() => {}); // reported below; this only stops an "unhandled rejection" while extraction runs
+  const extract = async () => {
+    try {
+      return await callModel(cfg, dataUrl, instruction, 'BoxScoreExtraction', BOX_SCORE_SCHEMA, deadline);
+    } catch (err) {
+      // Asking again after a timeout only waits twice as long. Other failures (a malformed answer,
+      // a busy API) get one more try if there is time.
+      if (!retryOnError || err.timeout || deadline - Date.now() < RETRY_NEEDS_MS) throw err;
+      try {
+        return await callModel(cfg, dataUrl, repairPrompt(instruction, err.message), 'BoxScoreExtraction', BOX_SCORE_SCHEMA, deadline);
+      } catch (retryErr) {
+        throw Object.assign(new Error(`Extraction failed after retry: ${retryErr.message}`), { timeout: retryErr.timeout });
+      }
+    }
+  };
   let data;
   try {
-    data = await callModel(cfg, dataUrl, instruction, 'BoxScoreExtraction', BOX_SCORE_SCHEMA);
+    [, data] = await Promise.all([check, extract()]); // a failed check ends the reading at once
   } catch (err) {
-    if (!retryOnError) throw err;
-    try {
-      data = await callModel(cfg, dataUrl, repairPrompt(instruction, err.message), 'BoxScoreExtraction', BOX_SCORE_SCHEMA);
-    } catch (retryErr) {
-      throw new Error(`Extraction failed after retry: ${retryErr.message}`);
-    }
+    if (check) await check; // "not a box score" explains more than whatever the extraction said
+    throw err;
   }
   data.metadata.extracted_from = 'nba2k_rec_boxscore_screenshot';
   return data;
@@ -385,13 +420,28 @@ export async function storeScreenshot(db, image) {
   return (await db.get('SELECT id FROM screenshots WHERE sha256 = ?', sha256)).id;
 }
 
+// Which game a saved game is, in words, for "already saved as ..." messages.
+export async function describeGame(db, gameId) {
+  const g = await db.get(`SELECT g.id, g.game_number, g.home_score, g.away_score, s.label, l.name AS league, w.number AS week,
+      th.name AS home_team, ta.name AS away_team
+    FROM games g JOIN series s ON s.id = g.series_id JOIN leagues l ON l.id = s.league_id
+    LEFT JOIN weeks w ON w.id = s.week_id LEFT JOIN teams th ON th.id = s.home_team_id LEFT JOIN teams ta ON ta.id = s.away_team_id
+    WHERE g.id = ?`, gameId);
+  if (!g) return null;
+  return { ...g, text: `${g.home_team} vs ${g.away_team}, ${g.week ? `Weekend ${g.week}` : g.label || g.league}, Game ${g.game_number} (${g.home_score}–${g.away_score})` };
+}
+
 // detect_series: when no series_id is given, work the matchup out from the players (detectSeries).
-export async function ingestScreenshot(db, cfg, { image, series_id: seriesId, detect_series: detect = false }) {
+// force: the image is already attached to a saved game, and the commissioner wants its reading
+// anyway (it was saved under the wrong game, or the same picture really is needed twice).
+export async function ingestScreenshot(db, cfg, { image, series_id: seriesId, detect_series: detect = false, force = false }) {
   const { mime, buffer } = parseDataUrl(image);
   const sha256 = createHash('sha256').update(buffer).digest('hex');
   const known = await db.get('SELECT id, game_id, extracted, warnings FROM screenshots WHERE sha256 = ?', sha256);
-  if (known?.game_id) {
-    return { screenshot_id: known.id, duplicate_game_id: known.game_id, message: 'Game already ingested with this image hash' };
+  if (known?.game_id && !force) {
+    const saved = await describeGame(db, known.game_id);
+    return { screenshot_id: known.id, duplicate_game_id: known.game_id, duplicate: saved,
+      message: `This exact image is already saved as ${saved?.text ?? 'a game'}.` };
   }
 
   let data, warnings;
@@ -402,30 +452,39 @@ export async function ingestScreenshot(db, cfg, { image, series_id: seriesId, de
   } else {
     if (!cfg.apiKey) throw new UserError('Screenshot reading is not set up yet: add OPENAI_API_KEY to the server settings.', 503);
     const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+    const deadline = Date.now() + (cfg.budgetMs ?? BUDGET_MS);
     try {
-      data = await extractBoxScore(cfg, dataUrl);
-      if (structureWarnings(data).length) {
-        data = await extractBoxScore(cfg, dataUrl, { retryOnError: false, feedback: structureWarnings(data) });
-      }
-      warnings = structureWarnings(data);
-      const critical = integrityWarnings(data).filter(isCritical);
-      if (critical.length) {
-        try {
-          const retry = await extractBoxScore(cfg, dataUrl, { retryOnError: false, feedback: critical });
-          const still = integrityWarnings(retry).filter(isCritical);
-          if (still.length < critical.length) data = retry;
-          if (still.length) warnings.push(`Critical integrity issues persist after retry: ${still.join('; ')}`);
-        } catch (err) {
-          warnings.push(`Integrity retry failed: ${err.message}. Continuing with original extraction.`);
+      data = await extractBoxScore(cfg, dataUrl, { deadline });
+      // One corrective re-read at most, covering everything wrong with the first reading (it used to
+      // be up to two, each checking the image again). It is kept only if it comes out cleaner.
+      const problems = d => [...structureWarnings(d), ...integrityWarnings(d).filter(isCritical)];
+      const first = problems(data);
+      if (first.length) {
+        if (deadline - Date.now() < RETRY_NEEDS_MS) {
+          first.note = 'The first reading had problems, and there was no time left to read it again. Check the numbers against the screenshot.';
+        } else {
+          try {
+            const retry = await extractBoxScore(cfg, dataUrl, { retryOnError: false, feedback: first, deadline });
+            const structure = structureWarnings(retry).length - structureWarnings(data).length;
+            if (structure < 0 || (structure === 0 && problems(retry).length < first.length)) data = retry;
+          } catch (err) {
+            first.note = `Integrity retry failed: ${err.message}. Continuing with original extraction.`;
+          }
         }
       }
+      warnings = structureWarnings(data);
+      const still = integrityWarnings(data).filter(isCritical);
+      if (first.length && still.length) warnings.push(`Critical integrity issues persist after retry: ${still.join('; ')}`);
+      if (first.note) warnings.push(first.note);
       for (const w of integrityWarnings(data)) if (!warnings.includes(w)) warnings.push(w);
       data.extraction_version = EXTRACTION_VERSION;
     } catch (err) {
       if (err instanceof UserError) throw err;
+      if (err.timeout) throw new UserError('The screenshot reader took too long and was stopped. Try again in a moment, or enter the box score by hand.', 504);
       throw new UserError(`Extraction failed: ${err.message}`, 502);
     }
 
+    // ON CONFLICT keeps game_id: a forced re-read of a saved image stays attached to its game.
     await db.run(`INSERT INTO screenshots (sha256, mime, image, extracted, warnings) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT (sha256) DO UPDATE SET mime = excluded.mime, image = excluded.image,
         extracted = excluded.extracted, warnings = excluded.warnings`,
@@ -438,12 +497,19 @@ export async function ingestScreenshot(db, cfg, { image, series_id: seriesId, de
   const series = !sid && detect ? await detectSeries(db, data) : null;
   if (series) sid = series.id;
   const draft = await buildDraft(db, data, sid);
-  const dup = await duplicateGame(db, draft);
-  if (dup) draft.warnings.unshift('Duplicate game found: same players with the same scores are already recorded.');
+  // A game with the same players and the same score, or (forced) the game this image is saved as.
+  const dup = (await duplicateGame(db, draft)) ?? (known?.game_id || null);
+  const saved = dup ? await describeGame(db, dup) : null;
+  if (dup) {
+    draft.warnings.unshift(known?.game_id
+      ? `This exact image is already saved as ${saved?.text ?? 'a game'}. Saving here records it a second time.`
+      : `Possible duplicate: ${saved?.text ?? 'a recorded game'} has the same players and the same score. This is only a warning.`);
+  }
   return {
     screenshot_id: screenshot.id,
     cached: stored?.extraction_version === EXTRACTION_VERSION,
     duplicate_game_id: dup,
+    duplicate: saved,
     quarters: data.game.quarters,
     ...(detect ? { series } : {}),
     ...draft,

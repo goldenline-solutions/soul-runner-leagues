@@ -105,7 +105,7 @@ test('an owner logged in with Discord manages their own roster on the site, with
 
   // The site knows which team they run.
   const me = (await api.bootstrap(db, { admin: false, userId: user.id, discordLogin: true })).me;
-  assert.deepEqual(me, { admin: false, user: { name: 'olive' }, manages: [mine.id], discord_login: true, player_id: null, pending_id: null, suggest_id: null });
+  assert.deepEqual(me, { admin: false, user: { name: 'olive' }, manages: [mine.id], discord_login: true, role_login: false, admin_via: null, roles_expired: false, player_id: null, pending_id: null, suggest_id: null });
   assert.deepEqual((await api.bootstrap(db, { admin: false })).me.manages, []);
 
   await roster.addFreeAgent(db, { member: { id: '111', name: 'ann' } });
@@ -166,7 +166,10 @@ test('a Discord account claims one profile on the site, and the bot gives it the
 
   me = (await api.bootstrap(db, { admin: false, userId: user.id })).me;
   assert.deepEqual([me.player_id, me.pending_id], [olive, null]);
-  await assert.rejects(roster.requestClaim(db, { discordId: '500', discordName: 'olive', playerId: other }), /already has the profile Olive.*one profile per account/);
+  // With a profile already, asking for another record is a request to merge it in (test/claims.test.js).
+  await roster.requestClaim(db, { discordId: '500', discordName: 'olive', playerId: other });
+  assert.equal((await roster.pendingClaims(db))[0].merge_tag, 'Olive');
+  assert.equal(await roster.cancelClaim(db, { discordId: '500', playerId: other }), true);
 
   // The bot gives the claimed account the team role.
   const roles = [];

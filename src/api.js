@@ -37,13 +37,15 @@ async function getSetting(db, key) {
 // ---------- public ----------
 
 // `userId` is the users.id of the Discord account logged in on this browser, if any.
-export async function bootstrap(db, { admin, userId = null, discordLogin = false }) {
+// roleTeams: teams this person manages through their Discord roles. adminVia: 'password', 'discord' or null.
+export async function bootstrap(db, { admin, userId = null, discordLogin = false, roleTeams = [], roleLogin = false, adminVia = admin ? 'password' : null, rolesExpired = false }) {
   const user = userId ? await db.get('SELECT discord_id, discord_name FROM users WHERE id = ?', userId) : null;
-  // The teams this person owns or captains: they can manage those rosters on the site.
-  const manages = user ? (await db.all('SELECT team_id FROM team_staff WHERE discord_id = ?', user.discord_id)).map(r => r.team_id) : [];
+  // The teams this person owns: they can manage those rosters on the site. Captains cannot.
+  const manages = user ? [...new Set([...(await db.all("SELECT team_id FROM team_staff WHERE discord_id = ? AND role = 'owner'", user.discord_id)).map(r => r.team_id), ...roleTeams])] : [];
   // Their claimed profile, or (before claiming) an unclaimed record with their Discord name to suggest.
   const claimed = user ? await db.get('SELECT id FROM players WHERE discord_id = ?', user.discord_id) : null;
-  const pending = user && !claimed
+  // An account with a profile can still ask for a second record (approving merges the two).
+  const pending = user
     ? await db.get("SELECT player_id FROM profile_claims WHERE discord_id = ? AND status = 'pending'", user.discord_id) : null;
   const suggest = user && !claimed && !pending
     ? await db.get('SELECT id FROM players WHERE discord_id IS NULL AND lower(discord_tag) = lower(?)', user.discord_name) : null;
@@ -57,7 +59,7 @@ export async function bootstrap(db, { admin, userId = null, discordLogin = false
     db.all(`SELECT g.id, g.series_id, g.game_number, g.home_score, g.away_score, g.forfeit,
       EXISTS (SELECT 1 FROM box_scores b WHERE b.game_id = g.id) AS has_box FROM games g`),
     // linked: the record is connected to a Discord account, so the bot can give that person roles.
-    db.all('SELECT id, discord_tag AS tag, (discord_id IS NOT NULL) AS linked, free_agent FROM players ORDER BY lower(discord_tag)'),
+    db.all('SELECT id, discord_tag AS tag, (discord_id IS NOT NULL) AS linked, free_agent, photo_version FROM players ORDER BY lower(discord_tag)'),
     db.all('SELECT * FROM news ORDER BY published_at DESC, id DESC LIMIT 50'),
     getSetting(db, 'allstar'),
     getSetting(db, 'rules'),
@@ -66,6 +68,8 @@ export async function bootstrap(db, { admin, userId = null, discordLogin = false
     leagues, teams, roster, weeks, series, games, players, news, allstar, rules,
     me: {
       admin, user: user ? { name: user.discord_name } : null, manages, discord_login: discordLogin,
+      // role_login: Discord roles decide commissioner and owner access. roles_expired: log in again to renew them.
+      role_login: roleLogin, admin_via: adminVia, roles_expired: rolesExpired,
       player_id: claimed?.id ?? null, pending_id: pending?.player_id ?? null, suggest_id: suggest?.id ?? null,
     },
   };
@@ -94,10 +98,10 @@ export async function stats(db, { league, phase }) {
 }
 
 export async function playerLog(db, id) {
-  const player = await db.get('SELECT id, discord_tag AS tag FROM players WHERE id = ?', id);
+  const player = await db.get('SELECT id, discord_tag AS tag, photo_version FROM players WHERE id = ?', id);
   if (!player) throw new UserError('Player not found.', 404);
   const games = await db.all(`SELECT b.*, g.game_number, g.home_score, g.away_score, g.forfeit, g.series_id,
-      s.stage, s.label, w.number AS week, s.home_team_id, s.away_team_id
+      s.stage, s.label, s.league_id, w.number AS week, s.home_team_id, s.away_team_id
     FROM box_scores b
     JOIN games g ON g.id = b.game_id
     JOIN series s ON s.id = g.series_id
@@ -142,6 +146,41 @@ export async function removeAlias(db, playerId, actor, aliasId) {
   await ownProfile(db, playerId, actor);
   await db.run('DELETE FROM player_aliases WHERE id = ? AND player_id = ?', aliasId, playerId);
   return { ok: true };
+}
+
+// ---------- player photos ----------
+// Same rule as aliases: the profile's owner or the commissioner. The browser shrinks the picture
+// to 640 px before upload.
+export const PHOTO_MAX_BYTES = 1_000_000;
+
+export async function savePlayerPhoto(db, playerId, actor, body) {
+  await ownProfile(db, playerId, actor);
+  // No SVG: an SVG can carry script, and photos are served from the site's own origin.
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(body.image || ''));
+  if (!m) throw new UserError('Upload a PNG, JPG or WebP image.');
+  const image = Buffer.from(m[2], 'base64');
+  if (image.length > PHOTO_MAX_BYTES) throw new UserError('That photo is too large (limit 1 MB).', 413);
+  return db.tx(async t => {
+    await t.run(`INSERT INTO player_photos (player_id, mime, image) VALUES (?, ?, ?)
+      ON CONFLICT (player_id) DO UPDATE SET mime = excluded.mime, image = excluded.image,
+        updated_at = to_char(timezone('utc', now()), 'YYYY-MM-DD HH24:MI:SS')`, playerId, m[1], image);
+    return t.get('UPDATE players SET photo_version = abs(photo_version) + 1 WHERE id = ? RETURNING photo_version', playerId);
+  });
+}
+
+export async function deletePlayerPhoto(db, playerId, actor) {
+  await ownProfile(db, playerId, actor);
+  await db.tx(async t => {
+    await t.run('DELETE FROM player_photos WHERE player_id = ?', playerId);
+    await t.run('UPDATE players SET photo_version = -abs(photo_version) WHERE id = ?', playerId);
+  });
+  return { ok: true };
+}
+
+export async function readPlayerPhoto(db, id, versioned) {
+  const row = await db.get('SELECT mime, image FROM player_photos WHERE player_id = ?', id);
+  if (!row) throw new UserError('No photo for this player.', 404);
+  return { mime: row.mime, data: Buffer.from(row.image), cache: versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=300' };
 }
 
 export async function awards(db, voter) {

@@ -2,8 +2,11 @@
 import {
   store, esc, api, $, $$, SLOTS, STAT_KEYS, STAT_LABELS, teamName, seriesGames, seriesRecord, standings, teamsIn,
   winPct, signed, currentWeek, pad2, ratio, setMsg, formData, gameWinner, teamLogo,
-  teamInitials, logoUrl,
+  teamInitials, logoUrl, gameOfTheWeek, leagueRoute, leagueFromSlug, leagueShort, shrinkLogo,
 } from './core.js';
+import { totals, derive, mergeByPlayer, rate, archetype, insights, highs, ARCHETYPE_MIN_GAMES } from './profile.js';
+
+const SCOUT_MIN_GAMES = 2; // same as src/scouting.js
 import { renderDiscord } from './discord-md.js';
 
 // ---------- About ----------
@@ -14,6 +17,7 @@ export function overview() {
   const d = store.data;
   const played = d.games.length;
   const next = currentWeek('premier') || currentWeek('affiliate');
+  const leagueNames = d.leagues.map(leagueShort);
   const latest = d.news[0];
   return `
   <a class="game-banner" href="${GAME_URL}" target="_blank" rel="noopener noreferrer">
@@ -24,12 +28,12 @@ export function overview() {
   </a>
   <section class="hero">
     <div class="hero-copy">
-      <div class="eyebrow">SEASON 1 · PREMIER + AFFILIATE LEAGUES</div>
+      <div class="eyebrow">SEASON 1 · ${esc(leagueNames.join(' + ').toUpperCase())}</div>
       <h1>Soul Runner<span>NBA 2k27 PC Leagues</span></h1>
       <p class="hero-tag">Two leagues. One court. Every possession counts.</p>
       <div class="hero-actions">
-        <a class="promo-link" href="#premier">Explore the teams →</a>
-        <a class="promo-link ghost" href="#schedule">See the schedule</a>
+        <a class="promo-link" href="#players?form=player">Register to play →</a>
+        ${d.leagues.map(l => `<a class="promo-link ghost" href="#${leagueRoute(l.id, 'home')}">${esc(l.name)}</a>`).join('')}
       </div>
     </div>
     <div class="hero-art"><img class="hero-logo" src="/logo.png" alt="Soul Runner SR logo" width="400" height="400"></div>
@@ -38,10 +42,12 @@ export function overview() {
     <div class="stat"><strong>${d.teams.length}</strong><span>TEAMS ACROSS TWO LEAGUES</span></div>
     <div class="stat"><strong>${d.series.filter(s => s.stage === 'regular').length}</strong><span>BEST-OF-3 MATCHUPS</span></div>
     <div class="stat"><strong>${played}</strong><span>GAMES IN THE BOOKS</span></div>
-    ${next ? `<a class="stat stat-link" href="#${next.week.league_id === 'premier' ? 'schedule' : 'affiliateSchedule'}">
+    ${next ? `<a class="stat stat-link" href="#${leagueRoute(next.week.league_id, 'schedule')}">
       <strong>WK ${pad2(next.week.number)}</strong><span>${next.live ? 'ON THE COURT NOW' : 'UP NEXT'} · ${esc(next.week.date_label).toUpperCase()}</span></a>` : ''}
   </div>
   ${latest ? `<a class="news-flash" href="#news"><span class="eyebrow">FROM TYREEK'S DESK</span><strong>${esc(latest.title)}</strong><span class="arrow" aria-hidden="true">→</span></a>` : ''}
+  ${registerCards()}
+  ${leagueCards()}
   ${thisWeekend()}
   <section class="about">
     <div class="about-head">
@@ -49,7 +55,7 @@ export function overview() {
       <h2>About the Leagues</h2>
     </div>
     <div class="about-body">
-      <p>Founded by Tyreek Hill, the Soul Runner NBA 2K27 PC Leagues bring players together through a shared love of basketball and competitive gaming. With Premier and Affiliate competition, our leagues give teams a place to build chemistry, develop rivalries, and put their skills to the test on the virtual court. Every game is an opportunity to compete, represent your crew, and be part of a growing basketball community.</p>
+      <p>Founded by Tyreek Hill, the Soul Runner NBA 2K27 PC Leagues bring players together through a shared love of basketball and competitive gaming. With Premier and G-League competition, our leagues give teams a place to build chemistry, develop rivalries, and put their skills to the test on the virtual court. Every game is an opportunity to compete, represent your crew, and be part of a growing basketball community.</p>
       <p>Our goal is to bring the spotlight to PC gaming and the players who make it special. Through league matchups, team streams, and the stories that unfold throughout the season, we want to showcase the talent, dedication, and excitement of NBA 2K27 basketball on PC. Whether you’re taking the court or tuning in to support your favorite team, you have a place in Soul Runner.</p>
     </div>
   </section>
@@ -77,9 +83,172 @@ function thisWeekend() {
   return blocks ? `<section class="section"><h2>This Weekend</h2>${blocks}</section>` : '';
 }
 
-// Premier / Affiliate switch for the pages that come in a pair.
-function leagueSwitch(current, routes) {
-  return `<nav class="seg" aria-label="League">${store.data.leagues.map(l => `<a href="#${routes[l.id]}" ${l.id === current ? 'class="active" aria-current="page"' : ''}>${esc(l.name.replace(/ League$/, ''))}</a>`).join('')}</nav>`;
+// Registration cards: one per form on the Registration page. Shown on the landing page and at the
+// bottom of each league page so signing up is never more than one click away.
+const REGISTER_CARDS = [
+  ['player', 'FREE AGENTS', 'Play this season', 'Sign up as a free agent and put your name in front of every team owner.', 'Register as a free agent'],
+  ['owner', 'TEAM OWNERS', 'Bring your crew', 'Register your team and its roster of up to seven players.', 'Register a team'],
+  ['sponsor', 'SPONSORS', 'Back the leagues', 'Put your brand or your name behind the Soul Runner community.', 'Become a sponsor'],
+];
+
+function registerCards(heading = 'Join the Leagues') {
+  return `<section class="section" aria-label="Registration">
+    <div class="section-head"><div><span class="eyebrow">REGISTRATION IS OPEN</span><h2>${heading}</h2></div>
+      <a class="promo-link ghost" href="#players">All registration forms</a></div>
+    <div class="card-grid">${REGISTER_CARDS.map(([form, eyebrow, title, copy, cta]) => `<a class="link-card register-card" href="#players?form=${form}">
+      <span class="eyebrow">${eyebrow}</span><strong>${title}</strong><span class="link-card-copy">${copy}</span>
+      <span class="link-card-cta">${cta} <span aria-hidden="true">→</span></span></a>`).join('')}</div>
+  </section>`;
+}
+
+// One card per league on the landing page: who leads it, its Game of the Week, a way in.
+function leagueCards() {
+  const cards = store.data.leagues.map(l => {
+    const table = standings(l.id);
+    const top = table[0];
+    const g = gameOfTheWeek(l.id);
+    const line = (label, value) => `<span class="league-card-line"><span>${label}</span><b>${value}</b></span>`;
+    return `<a class="link-card league-card" href="#${leagueRoute(l.id, 'home')}">
+      <span class="eyebrow">${esc(l.season_name.toUpperCase())}</span><strong>${esc(l.name)}</strong>
+      ${line('Teams', table.length)}
+      ${line('First place', top?.gp ? `${esc(top.team.name)} · ${top.sw}–${top.sl}` : 'Season not started')}
+      ${g ? line('Game of the Week', `${esc(g.home.team.name)} vs ${esc(g.away.team.name)}`) : ''}
+      <span class="link-card-cta">Standings, stats and schedule <span aria-hidden="true">→</span></span></a>`;
+  }).join('');
+  return `<section class="section" aria-labelledby="leaguesHeading">
+    <div class="section-head"><div><span class="eyebrow">TWO LEAGUES · ONE COURT</span><h2 id="leaguesHeading">The Leagues</h2></div></div>
+    <div class="card-grid two">${cards}</div>
+  </section>`;
+}
+
+// Premier / G-League switch for the pages that come in a pair. `page`: home, teams or schedule.
+function leagueSwitch(current, page) {
+  return `<nav class="seg" aria-label="League">${store.data.leagues.map(l => `<a href="#${leagueRoute(l.id, page)}" ${l.id === current ? 'class="active" aria-current="page"' : ''}>${esc(leagueShort(l))}</a>`).join('')}</nav>`;
+}
+
+// Tab strip at the top of every page that belongs to one league: all of that league's pages in one row.
+function leagueTabs(league, current) {
+  const l = store.data.leagueById.get(league);
+  const slug = leagueRoute(league, 'slug');
+  const tabs = [
+    ['home', 'Overview', leagueRoute(league, 'home')],
+    ['standings', 'Standings', `standings?league=${slug}`],
+    ['stats', 'Player Stats', `stats?league=${slug}`],
+    ['schedule', 'Schedule', leagueRoute(league, 'schedule')],
+    ['teams', 'Teams', leagueRoute(league, 'teams')],
+    ...(league === 'premier' ? [['playoffs', 'Playoffs', 'playoffs']] : []),
+    ['awards', 'Awards Race', 'awards'],
+  ];
+  return `<nav class="league-tabs" aria-label="${esc(l.name)} pages"><span class="league-tabs-name">${esc(leagueShort(l))}</span>${tabs.map(([key, label, href]) =>
+    `<a href="#${href}" ${key === current ? 'class="active" aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
+}
+
+// ---------- League pages (#premier, #gleague) ----------
+
+function gameOfTheWeekCard(league) {
+  const g = gameOfTheWeek(league);
+  if (!g) return '';
+  const l = store.data.leagueById.get(league);
+  const rec = seriesRecord(g.series);
+  const side = (x, wins) => `<a class="gotw-team${rec.winner === x.team.id ? ' winner' : ''}" href="#team/${x.team.id}">
+      ${teamLogo(x.team, 'lg')}
+      <span class="gotw-name">${g.ranked ? `<small>#${x.rank}</small> ` : ''}${esc(x.team.name)}</span>
+      <span class="gotw-record">${x.row.gp ? `${x.row.sw}–${x.row.sl} in matchups · ${signed(x.row.diff)}` : 'No games played yet'}</span>
+      ${rec.games.length ? `<span class="gotw-wins">${wins}</span>` : ''}</a>`;
+  const why = g.ranked
+    ? `#${g.home.rank} against #${g.away.rank} in the ${esc(l.name)} standings: the highest-ranked matchup of the weekend.`
+    : 'The season opener. Once results are in, this spot goes to the matchup between the highest-ranked teams.';
+  const status = rec.decided ? `${esc(teamName(rec.winner))} took it ${Math.max(rec.home, rec.away)}–${Math.min(rec.home, rec.away)}`
+    : rec.games.length ? 'Series in progress' : 'Best of 3';
+  const games = rec.games.map(x => {
+    const label = `G${x.game_number} ${x.home_score}–${x.away_score}`;
+    return x.has_box ? `<a href="#box/${x.id}">${label}</a>` : label;
+  }).join(' · ');
+  // One Watch button per team that has posted a stream link.
+  const watch = [g.home.team, g.away.team].filter(t => t.stream_url).map((t, i) =>
+    `<a class="promo-link${i ? ' ghost' : ''}" href="${esc(t.stream_url)}" target="_blank" rel="noopener noreferrer">Watch on the ${esc(t.name)} stream ↗</a>`);
+  return `<section class="gotw" aria-labelledby="gotwHeading">
+    <div class="gotw-top">
+      <div><span class="eyebrow">WEEKEND ${pad2(g.week.number)} · <time datetime="${esc(g.week.start_date)}">${esc(g.week.date_label).toUpperCase()}</time></span>
+        <h3 id="gotwHeading">Game of the Week</h3></div>
+      ${g.live ? '<span class="badge live">THIS WEEKEND</span>' : '<span class="badge">UP NEXT</span>'}
+    </div>
+    <div class="gotw-match">${side(g.home, rec.home)}<span class="gotw-vs" aria-hidden="true">VS</span>${side(g.away, rec.away)}</div>
+    <p class="gotw-why">${why}</p>
+    ${watch.length ? `<div class="gotw-watch">${watch.join('')}</div>` : ''}
+    <div class="gotw-foot">
+      <span>${status}${games ? ` · ${games}` : ''}</span>
+      ${watch.length ? '' : '<span>Streams not posted yet</span>'}
+      <a href="#${leagueRoute(league, 'schedule')}">Full weekend schedule →</a>
+    </div>
+  </section>`;
+}
+
+function standingsTable(l) {
+  const playoffs = l.id === 'premier';
+  return wrap(`<table class="data-table standings">
+    <thead><tr><th>#</th><th>Team</th><th class="num"><abbr title="Matchups won">W</abbr></th><th class="num"><abbr title="Matchups lost">L</abbr></th><th class="num"><abbr title="Matchup win percentage">PCT</abbr></th><th class="num"><abbr title="Games won and lost">GAMES</abbr></th><th class="num"><abbr title="Point differential">DIFF</abbr></th></tr></thead>
+    <tbody>${standings(l.id).map((r, i) => `<tr class="${playoffs && i === 7 ? 'playoff-line' : ''}">
+      <td class="rank${playoffs && i < 8 ? ' seed' : ''}">${i + 1}</td><td><a href="#team/${r.team.id}">${esc(r.team.name)}</a></td>
+      <td class="num">${r.sw}</td><td class="num">${r.sl}</td><td class="num">${winPct(r)}</td>
+      <td class="num">${r.w}–${r.l}</td><td class="num">${signed(r.diff)}</td></tr>`).join('')}</tbody>
+  </table>`) + (playoffs ? '<p class="muted">Dashed line: the top eight teams qualify for the playoffs.</p>' : '');
+}
+
+// A short plain-language explanation of each league, shown under the name on its landing page.
+// The team and weekend counts come from the data, so they stay right if the season changes.
+const LEAGUE_ABOUT = {
+  premier: (teams, weekends) => `The Premier League is the top division of the Soul Runner NBA 2K27 PC Leagues. ${teams} national teams play each other twice over ${weekends} weekends, and every matchup is a best-of-three series. The top eight teams in the standings reach the playoffs and play for the championship.`,
+  affiliate: (teams, weekends) => `The G-League is Soul Runner's second league, with its own season, standings and stats. ${teams} city teams play each other four times over ${weekends} weekends, one best-of-three matchup per weekend. A player can be on a G-League team and a Premier team at the same time.`,
+};
+
+export function league(id) {
+  const d = store.data;
+  const about = LEAGUE_ABOUT[id]?.(teamsIn(id).length, d.weeks.filter(w => w.league_id === id).length);
+  const l = d.leagueById.get(id);
+  const slug = leagueRoute(id, 'slug');
+  const cw = currentWeek(id);
+  const weekend = cw ? d.series.filter(s => s.week_id === cw.week.id) : [];
+  return `<div class="panel league-page">
+    ${leagueTabs(id, 'home')}
+    <div class="page-head"><div><span class="eyebrow">${esc(l.season_name.toUpperCase())}</span><h2>${esc(l.name)}</h2>
+      ${about ? `<p class="league-about">${esc(about)}</p>` : `<p>${esc(l.blurb)}</p>`}</div>${leagueSwitch(id, 'home')}</div>
+    ${gameOfTheWeekCard(id)}
+    <div class="league-cols">
+      <section aria-labelledby="leagueStandings">
+        <div class="section-head"><h3 id="leagueStandings">Standings</h3><a href="#standings?league=${slug}">Full standings →</a></div>
+        ${standingsTable(l)}
+      </section>
+      <section aria-labelledby="leagueLeaders">
+        <div class="section-head"><h3 id="leagueLeaders">League Leaders</h3><a href="#stats?league=${slug}">All player stats →</a></div>
+        <div id="leagueLeadersBody"><p class="muted">Loading stats…</p></div>
+      </section>
+    </div>
+    ${cw ? `<section class="schedule-week">
+      ${weekHeading(cw.week, weekend.length, cw.live)}
+      <div class="fixture-grid">${weekend.map(fixture).join('')}</div>
+    </section>` : ''}
+    ${registerCards(`Join the ${esc(l.name)}`)}
+  </div>`;
+}
+
+// app.js binds one of these per league (the league id comes first).
+league.after = async (id, el) => {
+  const rows = await api(`/api/stats?league=${id}&phase=regular`);
+  const body = $('#leagueLeadersBody', el);
+  if (body) body.innerHTML = rows.length ? leaderTiles(rows) : '<p class="muted">Leaders appear here as soon as the first box score is uploaded.</p>';
+};
+
+// The best per-game average in each of the five main stats; each tile opens that player's page.
+const LEADERS = [
+  ['POINTS PER GAME', r => r.pts / r.gp], ['REBOUNDS PER GAME', r => r.reb / r.gp], ['ASSISTS PER GAME', r => r.ast / r.gp],
+  ['STEALS PER GAME', r => r.stl / r.gp], ['BLOCKS PER GAME', r => r.blk / r.gp],
+];
+function leaderTiles(rows) {
+  return `<div class="stats leaders">${LEADERS.map(([label, fn]) => {
+    const top = [...rows].sort((a, b) => fn(b) - fn(a))[0];
+    return `<a class="stat stat-link" href="#player/${top.player_id}"><strong>${fn(top).toFixed(1)}</strong><span>${label}</span><em>${esc(top.tag)} · ${esc(top.team)}</em></a>`;
+  }).join('')}</div>`;
 }
 
 const wrap = table => `<div class="table-wrap">${table}</div>`;
@@ -89,12 +258,13 @@ const wrap = table => `<div class="table-wrap">${table}</div>`;
 export function teams(league) {
   const d = store.data;
   const names = teamsIn(league);
-  const title = league === 'premier' ? 'Premier League Teams & Rosters' : 'Affiliate League Teams & Rosters';
+  const title = `${esc(d.leagueById.get(league).name)} Teams &amp; Rosters`;
   const selected = new URLSearchParams(location.hash.split('?')[1]).get('team') || '';
   const table = new Map(standings(league).map(r => [r.team.id, r]));
   const shown = names.filter(t => !selected || String(t.id) === selected);
   return `<div class="panel">
-    <div class="page-head"><h2>${title}</h2>${leagueSwitch(league, { premier: 'premier', affiliate: 'affiliate' })}</div>
+    ${leagueTabs(league, 'teams')}
+    <div class="page-head"><h2>${title}</h2>${leagueSwitch(league, 'teams')}</div>
     <label class="league-filter">Show team
       <select data-team-filter>
         <option value="">Full League</option>
@@ -115,7 +285,7 @@ function teamCard(t, rec) {
   </article>`;
 }
 
-// The commissioner edits everything; a team's owners and captains manage their own roster.
+// The commissioner edits everything; a team's owners manage their own roster.
 function rosterButton(t) {
   const { admin, manages } = store.data.me;
   if (admin) return `<div class="roster-actions"><button data-edit-team="${t.id}">Update Roster</button></div>`;
@@ -150,12 +320,11 @@ const STAGE_ORDER = { regular: 0, qf: 1, sf: 2, final: 3 };
 export function team(id) {
   const d = store.data;
   const t = d.teamById.get(Number(id));
-  if (!t) return '<div class="panel"><h2>Team not found</h2><p><a href="#premier">See all teams</a></p></div>';
+  if (!t) return '<div class="panel"><h2>Team not found</h2><p><a href="#premierTeams">See all teams</a></p></div>';
   const league = d.leagueById.get(t.league_id);
   const table = standings(t.league_id);
   const rank = table.findIndex(r => r.team.id === t.id);
   const rec = table[rank];
-  const teamsRoute = t.league_id === 'premier' ? 'premier' : 'affiliate';
   const matchups = d.series
     .filter(s => s.home_team_id === t.id || s.away_team_id === t.id)
     .sort((a, b) => (STAGE_ORDER[a.stage] ?? 9) - (STAGE_ORDER[b.stage] ?? 9)
@@ -170,9 +339,9 @@ export function team(id) {
       <div class="team-hero-art" aria-hidden="true">${art}</div>
       ${d.me.admin ? `<button type="button" class="btn-ghost btn-small banner-edit" data-edit-team="${t.id}">${logo ? 'Change logo' : 'Add logo'}</button>` : ''}
       <div class="page-head team-hero-head">
-        <div><span class="eyebrow">${esc(league.name.toUpperCase())}</span>
+        <div><a class="eyebrow" href="#${leagueRoute(t.league_id, 'home')}">${esc(league.name.toUpperCase())}</a>
         <h2>${esc(t.name)}</h2></div>
-        <a class="promo-link ghost" href="#${teamsRoute}">All ${esc(league.name.replace(/ League$/, ''))} teams</a>
+        <a class="promo-link ghost" href="#${leagueRoute(t.league_id, 'teams')}">All ${esc(leagueShort(league))} teams</a>
       </div>
     </header>
     <div class="stats team-record-strip">
@@ -275,7 +444,8 @@ export function schedule(league) {
   const cw = currentWeek(league);
   const weeks = d.weeks.filter(w => w.league_id === league);
   return `<div class="panel">
-    <div class="page-head"><div><h2>${esc(l.season_name)}</h2><p>${esc(l.blurb)}</p></div>${leagueSwitch(league, { premier: 'schedule', affiliate: 'affiliateSchedule' })}</div>
+    ${leagueTabs(league, 'schedule')}
+    <div class="page-head"><div><h2>${esc(l.season_name)}</h2><p>${esc(l.blurb)}</p></div>${leagueSwitch(league, 'schedule')}</div>
     ${cw ? `<p><a class="promo-link" href="#week-${league}-${cw.week.number}" data-scroll>Jump to ${cw.live ? 'this weekend' : 'the next weekend'} → Weekend ${pad2(cw.week.number)}</a></p>` : ''}
     ${weeks.map(w => {
       const list = d.series.filter(s => s.week_id === w.id);
@@ -346,21 +516,15 @@ function seriesTable(s, home, away, rec) {
 
 // ---------- Standings ----------
 
-export function standingsView() {
-  return `<div class="panel"><h2>Standings</h2>
+// #standings shows both leagues; #standings?league=premier (or gleague) shows one.
+export function standingsView(_id, query) {
+  const only = leagueFromSlug(query?.get('league'));
+  const tab = (slug, label, on) => `<a href="#standings${slug ? `?league=${slug}` : ''}" ${on ? 'class="active" aria-current="page"' : ''}>${esc(label)}</a>`;
+  return `<div class="panel">${only ? leagueTabs(only, 'standings') : ''}<div class="page-head"><h2>Standings</h2>
+      <nav class="seg" aria-label="League">${tab('', 'Both', !only)}${store.data.leagues.map(l => tab(leagueRoute(l.id, 'slug'), leagueShort(l), l.id === only)).join('')}</nav></div>
     <p>Ranked by matchup win percentage: each best-of-3 is one win or loss. Ties are broken by game win percentage, then point differential.</p>
-    ${store.data.leagues.map(l => {
-      const rows = standings(l.id);
-      return `<h3 class="eyebrow league-label">${esc(l.name.toUpperCase())}</h3>
-      ${wrap(`<table class="data-table standings">
-        <thead><tr><th>#</th><th>Team</th><th class="num"><abbr title="Matchups won">W</abbr></th><th class="num"><abbr title="Matchups lost">L</abbr></th><th class="num"><abbr title="Matchup win percentage">PCT</abbr></th><th class="num"><abbr title="Games won and lost">GAMES</abbr></th><th class="num"><abbr title="Point differential">DIFF</abbr></th></tr></thead>
-        <tbody>${rows.map((r, i) => `<tr class="${l.id === 'premier' && i === 7 ? 'playoff-line' : ''}">
-          <td class="rank${l.id === 'premier' && i < 8 ? ' seed' : ''}">${i + 1}</td><td><a href="#team/${r.team.id}">${esc(r.team.name)}</a></td>
-          <td class="num">${r.sw}</td><td class="num">${r.sl}</td><td class="num">${winPct(r)}</td>
-          <td class="num">${r.w}–${r.l}</td><td class="num">${signed(r.diff)}</td></tr>`).join('')}</tbody>
-      </table>`)}
-      ${l.id === 'premier' ? '<p class="muted">Dashed line: the top eight teams qualify for the playoffs.</p>' : ''}`;
-    }).join('')}
+    ${store.data.leagues.filter(l => !only || l.id === only).map(l => `<h3 class="eyebrow league-label"><a href="#${leagueRoute(l.id, 'home')}">${esc(l.name.toUpperCase())}</a></h3>
+      ${standingsTable(l)}`).join('')}
   </div>`;
 }
 
@@ -378,8 +542,11 @@ const statState = { league: 'premier', phase: 'regular', team: '', sort: 'ppg', 
 const teamOptions = () => `<option value="">All teams</option>${teamsIn(statState.league).map(t =>
   `<option value="${t.id}" ${String(t.id) === statState.team ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}`;
 
-export function stats() {
-  return `<div class="panel"><h2>Player statistics</h2>
+// #stats?league=gleague opens the page on that league.
+export function stats(_id, query) {
+  const asked = leagueFromSlug(query?.get('league'));
+  if (asked && asked !== statState.league) Object.assign(statState, { league: asked, team: '' });
+  return `<div class="panel">${leagueTabs(statState.league, 'stats')}<h2>Player statistics</h2>
     <div class="toolbar">
       <label>League <select data-stat="league">${store.data.leagues.map(l => `<option value="${l.id}" ${statState.league === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></label>
       <label>Team <select data-stat="team">${teamOptions()}</select></label>
@@ -401,6 +568,8 @@ stats.after = async el => {
     if (key === 'team') return renderStatsTable(el);
     if (key === 'league') {
       statState.team = '';
+      history.replaceState(null, '', `#stats?league=${leagueRoute(statState.league, 'slug')}`); // keep the address in step
+      $('.league-tabs', el).outerHTML = leagueTabs(statState.league, 'stats');
       $('[data-stat="team"]', el).innerHTML = teamOptions();
     }
     fetchStats(el);
@@ -435,18 +604,8 @@ function renderStatsTable(el) {
   const sorted = [...rows].sort((a, b) => (text ? byName(text(a), text(b)) : num(a) - num(b)) * statState.dir
     || byName(a.tag, b.tag));
   const sortHead = (key, label, cls = '') => `<th${cls ? ` class="${cls}"` : ''} ${statState.sort === key ? `aria-sort="${statState.dir < 0 ? 'descending' : 'ascending'}"` : ''}><button data-sort="${key}">${label}</button></th>`;
-  const leader = (key, label, fn) => {
-    const top = [...rows].sort((a, b) => fn(b) - fn(a))[0];
-    return `<div class="stat"><strong>${fn(top).toFixed(1)}</strong><span>${label}</span><em>${esc(top.tag)} · ${esc(top.team)}</em></div>`;
-  };
   body.innerHTML = `
-    <div class="stats leaders">
-      ${leader('ppg', 'POINTS PER GAME', r => r.pts / r.gp)}
-      ${leader('rpg', 'REBOUNDS PER GAME', r => r.reb / r.gp)}
-      ${leader('apg', 'ASSISTS PER GAME', r => r.ast / r.gp)}
-      ${leader('spg', 'STEALS PER GAME', r => r.stl / r.gp)}
-      ${leader('bpg', 'BLOCKS PER GAME', r => r.blk / r.gp)}
-    </div>
+    ${leaderTiles(rows)}
     ${wrap(`<table class="data-table">
       <thead><tr>${sortHead('player', 'Player')}${sortHead('team', 'Team')}
         ${STAT_COLUMNS.map(([key, label]) => sortHead(key, label, 'num')).join('')}
@@ -493,7 +652,7 @@ box.after = async (el, id) => {
     </div>
     ${table('home')}${table('away')}
     <p>${shot ? `<a href="/api/screenshots/${shot}" target="_blank" rel="noopener">View the original screenshot ↗</a> · ` : ''}
-      <a href="#${s.league_id === 'premier' ? 'schedule' : 'affiliateSchedule'}">Back to the schedule</a>
+      <a href="#${leagueRoute(s.league_id, 'schedule')}">Back to the schedule</a>
       ${store.data.me.admin ? ` · <a href="#game?edit=${game.id}">Edit this result</a>` : ''}</p>`;
 };
 
@@ -510,21 +669,166 @@ function claimLine(playerId) {
   if (me.player_id === playerId) line = `This is your profile. ${remove}`;
   else if (me.pending_id === playerId && !linked) line = `Claim sent. A commissioner has to approve it. <button class="link-btn" data-unclaim="${playerId}">Cancel request</button>`;
   else if (linked) line = `Claimed profile${me.admin ? ` · ${remove}` : ''}`;
-  else if (me.user && !me.player_id) line = `<button data-claim="${playerId}">This is me: claim this profile</button>`;
+  else if (me.user && !me.player_id) line = `<button data-claim="${playerId}">This is me: claim this profile</button> <span class="small">Your Discord name does not have to match.</span>`;
+  // Someone with a profile who also played under this name: a commissioner merges the two.
+  else if (me.user && me.player_id) line = `<button class="btn-ghost btn-small" data-claim="${playerId}">This is also me: merge it into my profile</button> <span class="small">For when your stats landed under another name. A commissioner approves it.</span>`;
   else if (!me.user && me.discord_login) line = '<a href="/api/auth/discord">Log in with Discord</a> to claim this profile if it is yours.';
   return `<p class="muted">${line}</p><p class="msg" id="claimMsg" role="status"></p>`;
 }
 
-player.after = async (el, id) => {
-  const { player: p, games, aliases } = await api(`/api/players/${id}`);
+// ---------- Find your profile (#claim) ----------
+// The header only knows a profile is yours when its name matches your Discord name. This page
+// lists every record nobody has claimed, to search by in-game name, Steam name or team.
+
+export function claimFinder() {
   const { me } = store.data;
-  const canEdit = me.admin || me.player_id === Number(id);
-  const n = games.length;
-  const avg = k => (n ? (games.reduce((t, g) => t + g[k], 0) / n).toFixed(1) : '—');
-  const sum = k => games.reduce((t, g) => t + g[k], 0);
+  if (!me.user) {
+    return `<div class="panel"><h2>Claim your profile</h2>
+      <p>${me.discord_login ? '<a href="/api/auth/discord">Log in with Discord</a> first, then pick your player profile here.' : 'Discord login is not set up on this site yet.'}</p></div>`;
+  }
+  const mine = me.player_id && store.data.players.find(p => p.id === me.player_id);
+  return `<div class="panel"><h2>${mine ? 'Merge another record' : 'Claim your profile'}</h2>
+    <p>${mine
+    ? `Your profile is <a href="#player/${mine.id}">${esc(mine.tag)}</a>. If some of your games are under another name, find that record here and ask to merge it in.`
+    : 'Find the record with your stats. Your Discord name does not have to match: search by the name you play under, your Steam name or your team.'}
+      A commissioner approves each request.</p>
+    <div class="toolbar"><label>Search <input id="claimSearch" type="search" placeholder="In-game name, Steam name or team" autocomplete="off"></label></div>
+    <p class="msg" id="claimMsg" role="status"></p>
+    <div id="claimResults"><p class="muted">Loading players…</p></div>
+  </div>`;
+}
+
+claimFinder.after = async el => {
+  const { me } = store.data;
+  if (!me.user) return;
+  const list = await api('/api/claimable');
+  const draw = () => {
+    const q = $('#claimSearch', el).value.trim().toLowerCase();
+    const hits = list.filter(p => !q || [p.tag, p.aliases, p.teams].some(x => x.toLowerCase().includes(q)));
+    $('#claimResults', el).innerHTML = hits.length ? wrap(`<table class="data-table"><thead><tr><th>Player</th><th>Also known as</th><th>Team</th><th class="num">Games</th><th></th></tr></thead>
+      <tbody>${hits.slice(0, 60).map(p => `<tr><td><a href="#player/${p.id}">${esc(p.tag)}</a></td><td>${esc(p.aliases) || '—'}</td><td>${esc(p.teams) || '—'}</td><td class="num">${p.games}</td>
+        <td>${me.pending_id === p.id ? '<span class="muted">Request sent</span> <button class="link-btn" data-unclaim="' + p.id + '">Cancel</button>'
+    : `<button class="btn-small" data-claim="${p.id}">${me.player_id ? 'Merge into mine' : 'This is me'}</button>`}</td></tr>`).join('')}</tbody></table>`)
+      + (hits.length > 60 ? `<p class="muted small">Showing 60 of ${hits.length}. Type more of the name to narrow it down.</p>` : '')
+      : `<p>No unclaimed player matches ${q ? `"${esc(q)}"` : 'yet'}. If you have not played a recorded game or been signed to a team, there is no record to claim yet. A commissioner can also link you with <code>/roster link</code> in Discord.</p>`;
+  };
+  $('#claimSearch', el).oninput = draw;
+  draw();
+};
+
+// Player photo, or the first letters of the tag when there is none.
+function playerPhoto(p) {
+  if (p.photo_version > 0) return `<img class="player-photo" src="/api/players/${p.id}/photo?v=${p.photo_version}" alt="${esc(p.tag)}">`;
+  return `<span class="player-photo player-photo-empty" aria-hidden="true">${esc(p.tag.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase() || '?')}</span>`;
+}
+
+const one = n => n.toFixed(1);
+const pctCell = x => (x === null ? '—' : `${(x * 100).toFixed(1)}%`);
+
+// #player/ID, or #player/ID?league=gleague for someone who has played in both leagues.
+player.after = async (el, id, query) => {
+  const { player: p, games: every, aliases } = await api(`/api/players/${id}`);
+  const d = store.data, { me } = d;
+  const pid = Number(id);
+  const canEdit = me.admin || me.player_id === pid;
+
+  // One league at a time: the one asked for, or the one with the most games.
+  const played = d.leagues.filter(l => every.some(g => g.league_id === l.id));
+  const count = l => every.filter(g => g.league_id === l.id).length;
+  const league = played.find(l => l.id === leagueFromSlug(query?.get('league')))
+    || [...played].sort((a, b) => count(b) - count(a))[0] || null;
+  const games = every.filter(g => g.league_id === league?.id).map(g => {
+    const side = g.team_id === g.home_team_id ? 'home' : 'away';
+    return { ...g, opp: side === 'home' ? g.away_team_id : g.home_team_id, won: gameWinner(g) === side,
+      mine: side === 'home' ? g.home_score : g.away_score, theirs: side === 'home' ? g.away_score : g.home_score };
+  });
+  const peers = league ? mergeByPlayer(await api(`/api/stats?league=${league.id}&phase=all`)) : [];
+
+  const t = { ...totals(games), player_id: pid }, s = derive(t);
+  const rated = rate(t, peers);
+  const build = archetype(rated, t.gp);
+  const facts = league ? insights({ games, peers, leagueName: league.name, playerId: pid }) : [];
+  const best = highs(games);
+  const wins = games.filter(g => g.won).length;
+
+  // Current teams: every roster this player is on.
+  const spots = d.roster.filter(r => r.player_id === pid).map(r => ({ team: d.teamById.get(r.team_id), slot: r.slot })).filter(x => x.team);
+  const gameName = g => `${g.week ? `Wk ${pad2(g.week)}` : esc(g.label)} · G${g.game_number}`;
+
+  const tile = (value, label) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`;
+  const splitRow = (label, list) => {
+    const x = totals(list), y = derive(x);
+    return `<tr><th scope="row">${label}</th><td class="num">${x.gp}</td>
+      ${['ppg', 'rpg', 'apg', 'spg', 'bpg', 'topg', 'pfpg'].map(k => `<td class="num">${x.gp ? one(y[k]) : '—'}</td>`).join('')}
+      <td class="num">${pctCell(y.fg)}</td><td class="num">${pctCell(y.tp)}</td><td class="num">${pctCell(y.ft)}</td><td class="num">${pctCell(y.ts)}</td></tr>`;
+  };
+  const playoffs = games.filter(g => g.stage !== 'regular');
+  const byTeam = [...new Set(games.map(g => g.team_id))];
+
   $('#playerPanel', el).innerHTML = `
-    <h2>${esc(p.tag)}</h2>
-    ${claimLine(Number(id))}
+    <section class="player-hero">
+      <div class="player-photo-box">
+        ${playerPhoto(p)}
+        ${canEdit ? `<div class="player-photo-tools">
+          <label class="promo-link btn-small file-btn">${p.photo_version > 0 ? 'Replace photo' : 'Upload photo'}<input type="file" id="photoFile" accept="image/png,image/jpeg,image/webp"></label>
+          ${p.photo_version > 0 ? '<button type="button" class="btn-ghost btn-small" id="photoRemove">Remove</button>' : ''}
+        </div>` : ''}
+      </div>
+      <div class="player-id">
+        <span class="eyebrow">${spots.length ? spots.map(x => `<a href="#team/${x.team.id}">${esc(x.team.name)}</a> · ${esc(x.slot)}`).join(' &nbsp;/&nbsp; ') : 'FREE AGENT'}</span>
+        <h2>${esc(p.tag)}</h2>
+        ${build ? '<p class="archetype pending" aria-live="polite"><span>ARCHETYPE</span><strong>Generating name…</strong><em>Reading this player\'s stats.</em></p>'
+    : `<p class="archetype locked"><span>ARCHETYPE</span><strong>Not unlocked yet</strong><em>Shows after ${ARCHETYPE_MIN_GAMES} games with a box score.</em></p>`}
+        ${claimLine(pid)}
+        ${canEdit ? '<p class="msg" id="photoMsg" role="status"></p>' : ''}
+      </div>
+      ${build ? `<div class="player-ovr" title="Worked out from this player's stats against the rest of the league"><strong>${rated.overall}</strong><span>OVERALL</span></div>` : ''}
+    </section>
+    ${played.length > 1 ? `<nav class="seg player-league" aria-label="League">${played.map(l =>
+    `<a href="#player/${pid}?league=${leagueRoute(l.id, 'slug')}" ${l.id === league.id ? 'class="active" aria-current="page"' : ''}>${esc(leagueShort(l))}</a>`).join('')}</nav>` : ''}
+    ${!t.gp ? '<p>No games recorded yet. Stats, ratings and insights fill in after the first box score.</p>' : `
+    <div class="stats player-stats">
+      ${tile(t.gp, 'GAMES')}${tile(`${wins}–${t.gp - wins}`, 'TEAM RECORD')}
+      ${tile(one(s.ppg), 'POINTS')}${tile(one(s.rpg), 'REBOUNDS')}${tile(one(s.apg), 'ASSISTS')}
+      ${tile(one(s.spg), 'STEALS')}${tile(one(s.bpg), 'BLOCKS')}${tile(one(s.topg), 'TURNOVERS')}
+      ${tile(ratio(t.fgm, t.fga), 'FIELD GOAL %')}${tile(ratio(t.tpm, t.tpa), '3-POINT %')}${tile(ratio(t.ftm, t.fta), 'FREE THROW %')}
+      ${tile(pctCell(s.ts), 'TRUE SHOOTING %')}
+    </div>
+    <p class="muted small">Per-game averages in the ${esc(league.name)}, regular season and playoffs together.</p>
+    <section class="scout pending" id="scoutBox" aria-labelledby="scoutHeading" aria-live="polite">
+      <div class="section-head"><h3 id="scoutHeading">Scouting Report</h3><span class="badge">AI</span></div>
+      <p class="muted" id="scoutBody">${t.gp < SCOUT_MIN_GAMES ? `Shows after ${SCOUT_MIN_GAMES} games with a box score.` : 'Writing the scouting report… the first one for a player takes up to a minute.'}</p>
+    </section>
+    <div class="player-cols">
+      <section aria-labelledby="attrHeading">
+        <h3 id="attrHeading">Attributes</h3>
+        <ul class="attr-list">${rated.skills.map(k => `<li><span>${k.label}</span>
+          <span class="attr-bar" role="img" aria-label="${k.label}: ${k.rating} out of 99"><i data-w="${Math.round(k.score * 100)}"></i></span><b>${k.rating}</b></li>`).join('')}</ul>
+        <p class="muted small">${rated.compared ? `Each rating is where this player stands among ${esc(league.name)} players with enough games, from 40 (lowest) to 99 (highest).`
+    : 'Too few players have stats to compare yet, so these ratings use typical per-game figures. They switch to league rankings as more box scores come in.'}</p>
+      </section>
+      <section aria-labelledby="insightHeading">
+        <h3 id="insightHeading">Insights</h3>
+        ${facts.length ? `<ul class="insight-list">${facts.map(f => `<li><strong>${esc(f.title)}</strong><span>${esc(f.text)}</span></li>`).join('')}</ul>`
+    : '<p class="muted">Insights appear as more games are played.</p>'}
+        ${best.length ? `<h3 class="highs-title">Season highs</h3>
+        <div class="highs">${best.map(h => `<a class="high" href="#box/${h.game.game_id}" title="${gameName(h.game)} vs ${esc(teamName(h.game.opp))}">
+          <strong>${h.value}</strong><span>${h.label}</span><em>vs ${esc(teamName(h.game.opp))}</em></a>`).join('')}</div>` : ''}
+      </section>
+    </div>
+    ${wrap(`<table class="data-table"><caption>Splits (per game)</caption>
+      <thead><tr><th>Split</th>${['GP', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'FG%', '3P%', 'FT%', 'TS%'].map(h => `<th class="num">${h}</th>`).join('')}</tr></thead>
+      <tbody>${splitRow('All games', games)}${splitRow('Wins', games.filter(g => g.won))}${splitRow('Losses', games.filter(g => !g.won))}
+        ${playoffs.length ? splitRow('Regular season', games.filter(g => g.stage === 'regular')) + splitRow('Playoffs', playoffs) : ''}
+        ${byTeam.length > 1 ? byTeam.map(tid => splitRow(`With ${esc(teamName(tid))}`, games.filter(g => g.team_id === tid))).join('') : ''}</tbody>
+      <tfoot><tr><th scope="row">Totals</th><td class="num">${t.gp}</td>${['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'pf'].map(k => `<td class="num">${t[k]}</td>`).join('')}
+        <td class="num">${t.fgm}/${t.fga}</td><td class="num">${t.tpm}/${t.tpa}</td><td class="num">${t.ftm}/${t.fta}</td><td class="num">eFG ${pctCell(s.efg)}</td></tr></tfoot></table>`)}
+    ${wrap(`<table class="data-table"><caption>Game log</caption>
+      <thead><tr><th>Game</th><th>Result</th><th>Opponent</th>${['PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'FG', '3PT', 'FT'].map(h => `<th class="num">${h}</th>`).join('')}</tr></thead>
+      <tbody>${[...games].reverse().map(g => `<tr><td><a href="#box/${g.game_id}">${gameName(g)}</a></td>
+          <td><span class="wl ${g.won ? 'w' : 'l'}">${g.won ? 'W' : 'L'}</span> ${g.mine}–${g.theirs}</td><td>${teamLink(g.opp)}</td>
+          <td class="num">${g.pts}</td><td class="num">${g.reb}</td><td class="num">${g.ast}</td><td class="num">${g.stl}</td><td class="num">${g.blk}</td>
+          <td class="num">${g.tov}</td><td class="num">${g.pf}</td><td class="num">${g.fgm}/${g.fga}</td><td class="num">${g.tpm}/${g.tpa}</td><td class="num">${g.ftm}/${g.fta}</td></tr>`).join('')}</tbody></table>`)}`}
     ${aliases.length || canEdit ? `<section class="alias-box" aria-label="Aliases">
       <p class="muted">Also known as: ${aliases.length ? aliases.map(a => `<strong>${esc(a.alias)}</strong>${canEdit
     ? ` <button class="link-btn" data-alias-remove="${a.id}" aria-label="Remove alias ${esc(a.alias)}">remove</button>` : ''}`).join(' · ') : 'no other names yet'}</p>
@@ -534,24 +838,76 @@ player.after = async (el, id) => {
       </form>
       <p class="muted small">Box score screenshots that show one of these names are matched to this profile, so a Steam name change does not split your stats.</p>
       <p class="msg" id="aliasMsg" role="status"></p>` : ''}
-    </section>` : ''}
-    <div class="stats">
-      <div class="stat"><strong>${n}</strong><span>GAMES</span></div>
-      <div class="stat"><strong>${avg('pts')}</strong><span>POINTS PER GAME</span></div>
-      <div class="stat"><strong>${avg('reb')}</strong><span>REBOUNDS PER GAME</span></div>
-      <div class="stat"><strong>${avg('ast')}</strong><span>ASSISTS PER GAME</span></div>
-      <div class="stat"><strong>${ratio(sum('fgm'), sum('fga'))}</strong><span>FIELD GOAL %</span></div>
-    </div>
-    ${n ? wrap(`<table class="data-table"><caption>Game log</caption>
-      <thead><tr><th>Game</th><th>Team</th><th>Opponent</th>${['PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'FG', '3PT', 'FT'].map(h => `<th class="num">${h}</th>`).join('')}</tr></thead>
-      <tbody>${games.map(g => {
-        const opp = g.team_id === g.home_team_id ? g.away_team_id : g.home_team_id;
-        return `<tr><td><a href="#box/${g.game_id}">${g.week ? `Wk ${pad2(g.week)}` : esc(g.label)} · G${g.game_number}</a></td>
-          <td>${teamLink(g.team_id)}</td><td>${teamLink(opp)}</td>
-          <td class="num">${g.pts}</td><td class="num">${g.reb}</td><td class="num">${g.ast}</td><td class="num">${g.stl}</td><td class="num">${g.blk}</td>
-          <td class="num">${g.tov}</td><td class="num">${g.fgm}/${g.fga}</td><td class="num">${g.tpm}/${g.tpa}</td><td class="num">${g.ftm}/${g.fta}</td></tr>`;
-      }).join('')}</tbody></table>`) : '<p>No games recorded yet.</p>'}`;
+    </section>` : ''}`;
+  // The site forbids inline styles (Content-Security-Policy), so the bar widths are set from here.
+  for (const bar of $$('.attr-bar i', el)) bar.style.width = `${bar.dataset.w}%`;
+  // Scouting report: written by the model from the game log and teammate context, then saved.
+  if (t.gp >= SCOUT_MIN_GAMES) {
+    const body = () => $('#scoutBody', el);
+    api(`/api/players/${id}/scouting?league=${league.id}`).then(({ report: r }) => {
+      const box = $('#scoutBox', el);
+      if (!box) return; // the visitor already left this page
+      box.classList.remove('pending');
+      if (!r) {
+        body().textContent = 'No scouting report yet. Reports are written when the AI reader is set up on this server.';
+        return;
+      }
+      const items = xs => xs.map(x => `<li>${esc(x)}</li>`).join('');
+      body().outerHTML = `<p class="scout-headline">${esc(r.headline)}</p>
+        <p class="scout-summary">${esc(r.summary)}</p>
+        <div class="scout-cols">
+          <div><h4>Strengths</h4><ul class="scout-list plus">${items(r.strengths)}</ul></div>
+          <div><h4>Weaknesses</h4><ul class="scout-list minus">${items(r.weaknesses)}</ul></div>
+        </div>
+        <div class="scout-cols">
+          <div><h4>With teammates</h4><p>${esc(r.with_teammates)}</p></div>
+          <div><h4>How to guard them</h4><p>${esc(r.game_plan)}</p></div>
+        </div>
+        <p class="muted small">Written by AI from ${r.games} box score${r.games === 1 ? '' : 's'}${r.games < t.gp ? ` (${t.gp - r.games} newer not included yet)` : ''}. Confidence: ${esc(r.confidence)}. The teammate notes are inferences from who shared the floor, not confirmed roles.</p>`;
+    }).catch(() => { if (body()) body().textContent = 'The scouting report could not be loaded. Refresh to try again.'; });
+  }
+  // The archetype says "Generating name…" until the server answers (a few seconds the first time,
+  // instant once the name is saved). One name is ever shown: the AI-written one, or the rule-based
+  // one when the model is off or fails.
+  if (build) {
+    const show = (label, name, tagline) => {
+      const box = $('.archetype', el);
+      if (!box) return; // the visitor already left this page
+      box.classList.remove('pending');
+      $('span', box).textContent = label;
+      $('strong', box).textContent = name;
+      $('em', box).textContent = tagline;
+    };
+    api(`/api/players/${id}/archetype?league=${league.id}`)
+      .then(a => (a.name ? show(a.ai ? 'ARCHETYPE · AI' : 'ARCHETYPE', a.name, a.tagline) : show('ARCHETYPE', build.name, build.basis)))
+      .catch(() => show('ARCHETYPE', build.name, build.basis));
+  }
   if (!canEdit) return;
+
+  // Photo: saved as soon as a file is picked (shrunk to 640 px in the browser first).
+  const photo = async (options, done) => {
+    const msg = $('#photoMsg', el);
+    setMsg(msg, 'Saving…');
+    try {
+      await api(`/api/players/${id}/photo`, options);
+      await store.render();
+    } catch (err) {
+      setMsg(msg, err.message || done, 'error');
+    }
+  };
+  $('#photoFile', el).onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    let image;
+    try {
+      image = await shrinkLogo(file, 640);
+    } catch {
+      return setMsg($('#photoMsg', el), 'That file could not be read as an image.', 'error');
+    }
+    photo({ method: 'PUT', body: { image } });
+  };
+  if ($('#photoRemove', el)) $('#photoRemove', el).onclick = () => photo({ method: 'DELETE' });
+
   const change = async (path, options) => {
     try {
       await api(`/api/players/${id}/aliases${path}`, options);

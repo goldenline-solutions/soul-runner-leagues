@@ -13,7 +13,7 @@ let filter = 'new';
 export function desk() {
   const a = store.data.allstar || {};
   return `<div class="panel"><h2>Commissioner's Desk</h2>
-    <p>Everything here is private to the commissioner. Scores and box scores live in <a href="#game">Upload Results</a>; rosters are edited from each team's card (pick a team in <a href="#premier">Premier Teams</a> or <a href="#affiliate">Affiliate Teams</a>).</p>
+    <p>Everything here is private to the commissioner. Scores and box scores live in <a href="#game">Upload Results</a>; rosters are edited from each team's card (pick a team in <a href="#premierTeams">Premier Teams</a> or <a href="#gleagueTeams">G-League Teams</a>).</p>
 
     <section class="registration-section"><h3>Profile claims</h3>
       <p class="muted">People logged in with Discord who say a player profile is theirs. Approving links the profile to that Discord account, and the bot gives the account its roles.</p>
@@ -161,8 +161,10 @@ async function loadClaims(el) {
   const list = await api('/api/admin/claims');
   $('#claimList', el).innerHTML = list.length ? list.map(c => `<article class="reg-card">
       <strong>${esc(c.discord_name)}</strong> <span class="muted small">(Discord id ${esc(c.discord_id)})</span> says they are
-      <a href="#player/${c.player_id}">${esc(c.tag)}</a> <span class="muted small">· ${esc(String(c.created_at).slice(0, 10))}</span><br>
-      <button class="btn-small" data-claim-decide="approve" data-id="${c.id}">Approve</button>
+      <a href="#player/${c.player_id}">${esc(c.tag)}</a> <span class="muted small">(${c.games} game${c.games === 1 ? '' : 's'}) · ${esc(String(c.created_at).slice(0, 10))}</span><br>
+      ${c.merge_id ? `<span class="msg">Merge: this account already has the profile <a href="#player/${c.merge_id}">${esc(c.merge_tag)}</a> (${c.merge_games} game${c.merge_games === 1 ? '' : 's'}).
+        Approving moves its games, roster spot and aliases onto ${esc(c.tag)}, keeps "${esc(c.merge_tag)}" as an alias, and deletes the old record. This cannot be undone.</span><br>` : ''}
+      <button class="btn-small" data-claim-decide="approve" data-id="${c.id}">${c.merge_id ? 'Approve and merge' : 'Approve'}</button>
       <button class="btn-ghost btn-small" data-claim-decide="reject" data-id="${c.id}">Reject</button>
     </article>`).join('') : '<p class="muted">No claims waiting.</p>';
 }

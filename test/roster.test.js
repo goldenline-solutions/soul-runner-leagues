@@ -155,7 +155,7 @@ test('/roster in Discord: commissioners only, roles follow the roster, sync repa
   };
   const user = { id: '111', username: 'ann' };
 
-  assert.match(await run('sign', { team: String(a.id), user }, false), /only do that for a team you own or captain/);
+  assert.match(await run('sign', { team: String(a.id), user }, false), /only do that for a team you own/);
   assert.match(await run('setrole', { team: String(a.id), role: 'role-a' }, false), /Only a commissioner/);
   assert.match(await run('setrole', { team: String(a.id), role: 'role-a' }), /players now get <@&role-a>/);
   await run('setrole', { team: String(b.id), role: 'role-b' });

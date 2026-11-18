@@ -5,6 +5,9 @@ import * as api from './api.js';
 import { ingestConfig, ingestScreenshot, readScreenshot } from './ingest.js';
 import * as scrim from './scrim.js';
 import * as roster from './roster.js';
+import { playerArchetype } from './archetype.js';
+import { playerScouting } from './scouting.js';
+import { accessFor, saveRoles } from './access.js';
 import { discordOAuth } from './discord-oauth.js';
 
 export const SECURITY_HEADERS = {
@@ -34,7 +37,13 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
 
   // [method, pattern, handler, options]. Handlers receive ctx and return JSON-able data.
   const routes = [
-    ['GET', /^\/api\/bootstrap$/, ctx => api.bootstrap(db, { admin: ctx.admin, userId: auth.userId(ctx.cookies), discordLogin: discord.enabled })],
+    ['GET', /^\/api\/bootstrap$/, async ctx => {
+      const access = await ctx.access();
+      return api.bootstrap(db, {
+        admin: ctx.admin, userId: auth.userId(ctx.cookies), discordLogin: discord.enabled,
+        roleTeams: access.teams, roleLogin: discord.roles, adminVia: ctx.adminVia, rolesExpired: access.expired,
+      });
+    }],
     ['GET', /^\/api\/games\/(\d+)$/, ctx => api.gameDetail(db, id(ctx.params[0]))],
     ['GET', /^\/api\/stats$/, ctx => api.stats(db, {
       league: ctx.query.get('league') || 'premier', phase: ctx.query.get('phase') || 'regular',
@@ -99,6 +108,8 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
       if (!auth.stateMatches(ctx.cookies, ctx.query.get('state'))) throw new UserError('That login link expired. Start again.', 400);
       const profile = await discord.profile(ctx.query.get('code'));
       const user = await scrim.upsertUser(db, { discordId: profile.id, name: profile.username });
+      // The roles they hold in the server right now decide what they may do here (src/access.js).
+      if (discord.roles) await saveRoles(db, user.id, profile.roles);
       ctx.setCookie(auth.userCookie(user.id));
       return '/';
     }, { redirect: true }],
@@ -112,7 +123,7 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
       return { user: user ?? null, ...(user ? await scrim.queueStatus(db, user.id) : {}), discord_login: discord.enabled };
     }],
 
-    // A team's roster, for its owners and captains (logged in with Discord) and the commissioner.
+    // A team's roster, for its owners (logged in with Discord) and the commissioner. Captains cannot.
     // src/roster.js checks that the caller runs this team and applies the owner limits.
     ['POST', /^\/api\/teams\/(\d+)\/roster\/sign$/, async ctx => roster.siteSign(db, { teamId: id(ctx.params[0]), playerId: id(ctx.body.player_id), slot: ctx.body.slot, actor: await ctx.actor() })],
     ['POST', /^\/api\/teams\/(\d+)\/roster\/release$/, async ctx => roster.siteRelease(db, { teamId: id(ctx.params[0]), playerId: id(ctx.body.player_id), actor: await ctx.actor() })],
@@ -131,11 +142,22 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
       return roster.unclaimProfile(db, { playerId, actor });
     }],
     ['GET', /^\/api\/admin\/claims$/, () => roster.pendingClaims(db), { admin: true }],
+    // The "find your profile" page: every record nobody has claimed yet.
+    ['GET', /^\/api\/claimable$/, async ctx => { await ctx.discordUser(); return roster.claimCandidates(db); }],
     ['POST', /^\/api\/admin\/claims\/(\d+)\/(approve|reject)$/, ctx => roster.decideClaim(db, { claimId: id(ctx.params[0]), approve: ctx.params[1] === 'approve' }), { admin: true }],
 
     // Aliases on a profile: its owner (Discord login) or the commissioner.
     ['POST', /^\/api\/players\/(\d+)\/aliases$/, async ctx => api.addAlias(db, id(ctx.params[0]), await ctx.actor(), ctx.body)],
     ['DELETE', /^\/api\/players\/(\d+)\/aliases\/(\d+)$/, async ctx => api.removeAlias(db, id(ctx.params[0]), await ctx.actor(), id(ctx.params[1]))],
+
+    // AI archetype name for a player page (saved; written again only when the stat profile changes).
+    ['GET', /^\/api\/players\/(\d+)\/archetype$/, ctx => playerArchetype(db, ingest, id(ctx.params[0]), ctx.query.get('league') || 'premier', fetchImpl)],
+    // AI scouting report for a player page (saved; written again after a new box score).
+    ['GET', /^\/api\/players\/(\d+)\/scouting$/, ctx => playerScouting(db, ingest, id(ctx.params[0]), ctx.query.get('league') || 'premier', fetchImpl)],
+    // Photo on a profile: same people as aliases.
+    ['PUT', /^\/api\/players\/(\d+)\/photo$/, async ctx => api.savePlayerPhoto(db, id(ctx.params[0]), await ctx.actor(), ctx.body), { maxBody: 2e6 }],
+    ['DELETE', /^\/api\/players\/(\d+)\/photo$/, async ctx => api.deletePlayerPhoto(db, id(ctx.params[0]), await ctx.actor())],
+    ['GET', /^\/api\/players\/(\d+)\/photo$/, ctx => api.readPlayerPhoto(db, id(ctx.params[0]), ctx.query.has('v')), { raw: true }],
 
     // Scrim queue. The same src/scrim.js functions the Discord bot calls; the bot's 30 second tick
     // opens the match thread for anything matched from here.
@@ -176,7 +198,11 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
     }
     if (!found) throw new UserError('Not found.', 404);
     const [, , handler, options = {}] = found;
-    const admin = auth.isAdmin(cookies);
+    // Commissioner: the password session, or a Discord login that holds the Commissioner role.
+    let access;
+    const getAccess = async () => (access ??= await accessFor(db, env, discord, auth.userId(cookies)));
+    const byPassword = auth.isAdmin(cookies);
+    const admin = byPassword || (auth.userId(cookies) ? (await getAccess()).commissioner : false);
     if (options.admin && !admin) throw new UserError('Commissioner login required.', 401);
 
     let body = {};
@@ -192,6 +218,8 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
     let voter;
     const ctx = {
       params, body, admin, cookies, query: url.searchParams,
+      adminVia: byPassword ? 'password' : admin ? 'discord' : null,
+      access: getAccess,
       // The users.id of the Discord account logged in on this browser.
       user: () => {
         const userId = auth.userId(cookies);
@@ -199,7 +227,9 @@ export function createApp({ db, env = process.env, fetchImpl = fetch }) {
         return userId;
       },
       // Who is changing a roster: the commissioner, or the Discord account logged in here.
-      actor: async () => (admin ? { commissioner: true } : { commissioner: false, discordId: (await ctx.discordUser()).discord_id }),
+      // teams: the teams their Discord roles make them an owner of. ownersOnly: captains do not manage rosters.
+      actor: async () => (admin ? { commissioner: true }
+        : { commissioner: false, discordId: (await ctx.discordUser()).discord_id, teams: (await getAccess()).teams, ownersOnly: true }),
       // The Discord account logged in on this browser.
       discordUser: async () => {
         const user = await db.get('SELECT discord_id, discord_name FROM users WHERE id = ?', ctx.user());

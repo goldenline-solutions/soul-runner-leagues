@@ -4,7 +4,9 @@
 //
 // Three levels:
 //   everyone                 /roster view, /roster freeagents
-//   a team's owner, captain  sign (from the free agent pool), release, move (slot only): own team
+//   a team's owner           sign (from the free agent pool), release, move (slot only): own team.
+//                            An owner holds the Owner role and the team's role, or was made an
+//                            owner with /roster staff. Captains do not get these commands.
 //   commissioners            everything. A commissioner holds the COMMISSIONER_ROLE_ID role or
 //                            has Manage Server.
 import { UserError } from '../src/league.js';
@@ -25,8 +27,8 @@ export const commands = [{
   options: [
     sub('view', "Show a team's roster", [TEAM]),
     sub('freeagents', 'Show the free agent pool'),
-    sub('sign', 'Sign a member to a team (owners and captains: free agents, own team)', [TEAM, USER, SLOT]),
-    sub('release', 'Release a member from their team (owners and captains: own team)', [USER, { ...TEAM, required: false, description: 'Only needed when they are on a team in each league' }]),
+    sub('sign', 'Sign a member to a team (owners: free agents, own team)', [TEAM, USER, SLOT]),
+    sub('release', 'Release a member from their team (owners: own team)', [USER, { ...TEAM, required: false, description: 'Only needed when they are on a team in each league' }]),
     sub('move', 'Change a player\'s slot. Commissioners: also move them to another team in the league', [USER, TEAM, SLOT]),
     sub('staff', 'Commissioners: make a member an owner or captain of a team, or remove them', [TEAM, USER, {
       type: 3, name: 'position', description: 'Their position on the team', required: true,
@@ -45,12 +47,19 @@ export const commands = [{
 }];
 
 const OPEN_TO_ALL = ['view', 'freeagents'];
-// Open to a team's owners and captains too; src/roster.js limits them to their own team.
+// Open to a team's owners too; src/roster.js limits them to their own team.
 const STAFF_TOO = ['sign', 'release', 'move'];
 
 const isCommissioner = (i, ctx) => i.memberPermissions.has(MANAGE_GUILD)
   || Boolean(ctx.commissionerRoleId && i.member?.roles.cache.has(ctx.commissionerRoleId));
-const actor = (i, ctx) => ({ commissioner: isCommissioner(i, ctx), discordId: i.user.id });
+// The teams this member owns by role: the Owner role together with a team's role.
+async function ownedByRole(i, ctx) {
+  const held = i.member?.roles.cache;
+  if (!ctx.ownerRoleId || !held?.has(ctx.ownerRoleId)) return [];
+  return (await ctx.db.all('SELECT id, discord_role_id FROM teams WHERE discord_role_id IS NOT NULL'))
+    .filter(team => held.has(team.discord_role_id)).map(team => team.id);
+}
+const actor = async (i, ctx) => ({ commissioner: isCommissioner(i, ctx), discordId: i.user.id, teams: await ownedByRole(i, ctx), ownersOnly: true });
 
 // ---------- roles ----------
 
@@ -215,17 +224,17 @@ const ACTIONS = {
     // Holding the free agent role counts as being a free agent, even if nobody ran /roster freeagent.
     const holdsRole = Boolean(ctx.freeAgentRoleId && i.options.getMember('user')?.roles.cache.has(ctx.freeAgentRoleId));
     const m = { ...member(i), freeAgentRole: holdsRole };
-    const r = await roster.sign(ctx.db, { teamId: teamId(i), member: m, slot: i.options.getString('slot'), by: i.user.id, actor: actor(i, ctx) });
+    const r = await roster.sign(ctx.db, { teamId: teamId(i), member: m, slot: i.options.getString('slot'), by: i.user.id, actor: await actor(i, ctx) });
     await loud(i, withWarnings(`✅ <@${m.id}> signed with **${r.team.name}** (${r.slot}).`, await applyRoles(i, ctx, m.id, r.roles)));
   },
   release: async (i, ctx) => {
     const m = member(i);
-    const r = await roster.release(ctx.db, { member: m, teamId: teamId(i), by: i.user.id, actor: actor(i, ctx) });
+    const r = await roster.release(ctx.db, { member: m, teamId: teamId(i), by: i.user.id, actor: await actor(i, ctx) });
     await loud(i, withWarnings(`<@${m.id}> was released by **${r.team.name}**${r.freeAgent ? ' and is now a free agent' : ''}.`, await applyRoles(i, ctx, m.id, r.roles)));
   },
   move: async (i, ctx) => {
     const m = member(i);
-    const r = await roster.move(ctx.db, { member: m, teamId: teamId(i), slot: i.options.getString('slot'), by: i.user.id, actor: actor(i, ctx) });
+    const r = await roster.move(ctx.db, { member: m, teamId: teamId(i), slot: i.options.getString('slot'), by: i.user.id, actor: await actor(i, ctx) });
     const text = r.from.id === r.team.id
       ? `<@${m.id}> moved from ${r.from.slot} to ${r.slot} on **${r.team.name}**.`
       : `🔁 <@${m.id}> moved from **${r.from.name}** to **${r.team.name}** (${r.slot}).`;

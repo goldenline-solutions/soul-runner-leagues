@@ -49,6 +49,17 @@ export async function load() {
   return d;
 }
 
+// Page names (the part after # in the address) for the pages each league has. The G-League's
+// internal id is still 'affiliate'; `slug` is the name used in addresses like #standings?league=gleague.
+export const LEAGUE_ROUTES = {
+  premier: { slug: 'premier', home: 'premier', teams: 'premierTeams', schedule: 'schedule' },
+  affiliate: { slug: 'gleague', home: 'gleague', teams: 'gleagueTeams', schedule: 'gleagueSchedule' },
+};
+export const leagueRoute = (league, page) => (LEAGUE_ROUTES[league] || LEAGUE_ROUTES.premier)[page];
+export const leagueFromSlug = slug => Object.keys(LEAGUE_ROUTES).find(id => LEAGUE_ROUTES[id].slug === slug) || '';
+// "Premier League" -> "Premier"; "G-League" stays as it is.
+export const leagueShort = l => l.name.replace(/ League$/, '');
+
 export const teamName = id => store.data.teamById.get(id)?.name ?? '';
 
 export const teamInitials = t => t.name.split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase();
@@ -143,6 +154,24 @@ export function currentWeek(league) {
   if (live) return { week: live, live: true };
   const next = weeks.find(w => w.start_date > today);
   return next ? { week: next, live: false } : null;
+}
+
+// Game of the Week: of this weekend's matchups, the one between the two best-placed teams (lowest
+// combined standings rank; the closer pair wins a tie). Before any game is played the standings
+// say nothing, so the first matchup on the schedule gets the spot.
+export function gameOfTheWeek(league) {
+  const cw = currentWeek(league);
+  if (!cw) return null;
+  const table = standings(league);
+  const rank = new Map(table.map((r, i) => [r.team.id, i]));
+  const list = store.data.series.filter(s => s.week_id === cw.week.id && rank.has(s.home_team_id) && rank.has(s.away_team_id));
+  if (!list.length) return null;
+  const ranked = table.some(r => r.gp > 0);
+  const sum = s => rank.get(s.home_team_id) + rank.get(s.away_team_id);
+  const gap = s => Math.abs(rank.get(s.home_team_id) - rank.get(s.away_team_id));
+  const series = ranked ? [...list].sort((a, b) => sum(a) - sum(b) || gap(a) - gap(b) || a.id - b.id)[0] : list[0];
+  const side = id => ({ team: store.data.teamById.get(id), row: table[rank.get(id)], rank: rank.get(id) + 1 });
+  return { series, week: cw.week, live: cw.live, ranked, home: side(series.home_team_id), away: side(series.away_team_id) };
 }
 
 export const pad2 = n => String(n).padStart(2, '0');

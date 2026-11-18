@@ -1,11 +1,14 @@
 // Roster management. Rosters live in roster_slots (seven slots per team), the same rows the site
 // shows. The rule this file enforces: a player is on at most ONE team per league (one Premier
-// team and one Affiliate team is allowed; two teams in the same league never is).
+// team and one G-League team is allowed; two teams in the same league never is).
 //
-// Who may change a roster: commissioners can do everything. A team's owners and captains
-// (team_staff) can do three things for their own team only: sign a player from the free agent
+// Who may change a roster: commissioners can do everything. A team's owners (team_staff, or the
+// Owner role with the team's role; captains only when the caller does not pass ownersOnly, and
+// both the site and the bot pass it) can do three things for their own team only: sign a player from the free agent
 // pool, release a player, and change a player's slot. Callers pass `actor`:
-// { commissioner: true } or { commissioner: false, discordId }. No actor means a commissioner.
+// { commissioner: true } or { commissioner: false, discordId, teams, ownersOnly }. No actor means a
+// commissioner. teams: team ids the caller already knows this person runs (from their Discord
+// roles). ownersOnly: captains do not count; the Discord /roster commands pass it, the site does not.
 //
 // Every change runs under one lock and is written to roster_moves. Functions that change who is
 // on a team return `roles`: which Discord roles the bot should add and remove (bot/roster.js).
@@ -31,12 +34,14 @@ const log = (t, playerId, action, fromTeamId, toTeamId, by, source = 'discord') 
   (player_id, action, from_team_id, to_team_id, by_discord_id, source) VALUES (?, ?, ?, ?, ?, ?)`, playerId, action, fromTeamId, toTeamId, by ?? null, source);
 const roleIds = (...ids) => ids.filter(Boolean);
 
-const isStaff = (t, teamId, discordId) => t.get('SELECT role FROM team_staff WHERE team_id = ? AND discord_id = ?', teamId, String(discordId));
+// ownersOnly: captains do not count (the Discord /roster commands).
+const isStaff = (t, teamId, discordId, ownersOnly = false) => t.get(`SELECT role FROM team_staff WHERE team_id = ? AND discord_id = ?${ownersOnly ? " AND role = 'owner'" : ''}`, teamId, String(discordId));
 const limited = actor => Boolean(actor) && !actor.commissioner;
 // Owners and captains act only for their own team.
 async function mustManage(t, actor, team) {
-  if (limited(actor) && !(await isStaff(t, team.id, actor.discordId))) {
-    throw new UserError(`You can only do that for a team you own or captain, and ${team.name} is not one. Ask a commissioner.`, 403);
+  // actor.teams: teams the site found from their Discord roles (src/access.js).
+  if (limited(actor) && !actor.teams?.includes(team.id) && !(await isStaff(t, team.id, actor.discordId, actor.ownersOnly))) {
+    throw new UserError(`You can only do that for a team you ${actor.ownersOnly ? 'own' : 'own or captain'}, and ${team.name} is not one. Ask a commissioner.`, 403);
   }
 }
 
@@ -188,7 +193,7 @@ export async function recordSiteSave(t, team, before, after) {
   }
 }
 
-// The site's team page, for a team's owners and captains (logged in with Discord) and for the
+// The site's team page, for a team's owners (logged in with Discord) and for the
 // commissioner. Same rules and limits as the /roster commands, but by player record instead of
 // Discord member, because a player typed on the site may have no Discord account on record.
 
@@ -246,14 +251,62 @@ export async function siteSlot(db, { teamId, playerId, slot, actor }) {
 // Discord account, one account per profile. The request waits in profile_claims until a
 // commissioner approves it; from then on the record is linked exactly as with /roster link.
 
-// Refuses a claim that can never stand: the record or the account is already taken.
+// A person often ends up with two records: one made from their Discord name (a signing, the free
+// agent role) and one made from their in-game name (box scores). So an account that already has a
+// profile can still claim another unclaimed record: approving that claim merges the two.
+
+// Refuses a claim that can never stand: the record is already taken, or (for an account that has
+// a profile) the two records played in the same game, so they are two people.
+// Returns { target, own }: own is the profile the account already has, if any.
 async function claimable(t, discordId, playerId) {
   const target = await t.get('SELECT * FROM players WHERE id = ?', playerId);
   if (!target) throw new UserError('Player not found.', 404);
   if (target.discord_id === String(discordId)) throw new UserError(`${target.discord_tag} is already this account's profile.`, 409);
   if (target.discord_id) throw new UserError(`${target.discord_tag} is already claimed by another Discord account. If that is wrong, ask a commissioner.`, 409);
-  const own = await t.get('SELECT discord_tag FROM players WHERE discord_id = ?', String(discordId));
-  if (own) throw new UserError(`This account already has the profile ${own.discord_tag}. Remove that claim first: one profile per account.`, 409);
+  const own = await t.get('SELECT * FROM players WHERE discord_id = ?', String(discordId));
+  if (own) await mergeable(t, own, target);
+  return { target, own: own ?? null };
+}
+
+async function mergeable(t, a, b) {
+  const clash = await t.get(`SELECT x.game_id FROM box_scores x JOIN box_scores y ON y.game_id = x.game_id
+    WHERE x.player_id = ? AND y.player_id = ? LIMIT 1`, a.id, b.id);
+  if (clash) throw new UserError(`${a.discord_tag} and ${b.discord_tag} both played in the same game, so they are two different players and cannot be one profile.`, 409);
+}
+
+// Folds the record `from` into the record `to` and deletes `from`: box scores, roster spots,
+// votes, move history, aliases and photo all end up on `to`. The name of `from` becomes an alias
+// of `to`, so screenshots and forms that use either name find the one profile.
+async function mergePlayers(t, from, to) {
+  await mergeable(t, from, to);
+  // Roster: one team per league. A spot of `from` moves over unless `to` already has one in that league.
+  const taken = new Set((await spotsOf(t, to.id)).map(s => s.league_id));
+  for (const s of await spotsOf(t, from.id)) {
+    await t.run('UPDATE roster_slots SET player_id = ? WHERE team_id = ? AND slot = ?', taken.has(s.league_id) ? null : to.id, s.team_id, s.slot);
+    taken.add(s.league_id);
+  }
+  for (const table of ['box_scores', 'scrim_box_scores', 'solo_box_scores', 'award_votes', 'roster_moves']) {
+    await t.run(`UPDATE ${table} SET player_id = ? WHERE player_id = ?`, to.id, from.id);
+  }
+  if (!(await t.get('SELECT 1 AS x FROM player_photos WHERE player_id = ?', to.id))
+    && (await t.run('UPDATE player_photos SET player_id = ? WHERE player_id = ?', to.id, from.id)).changes) {
+    await t.run('UPDATE players SET photo_version = abs(photo_version) + 1 WHERE id = ?', to.id);
+  }
+  // The saved AI name and scouting report were written from half the games: they are written again.
+  await t.run('DELETE FROM player_archetypes WHERE player_id = ?', to.id);
+  await t.run('DELETE FROM player_scouting WHERE player_id = ?', to.id);
+  // The old Steam name becomes the profile's Steam name when it has none, and an alias otherwise.
+  const names = [from.discord_tag, to.steam_tag ? from.steam_tag : '', ...(await t.all('SELECT alias FROM player_aliases WHERE player_id = ?', from.id)).map(a => a.alias)].filter(Boolean);
+  await t.run('DELETE FROM players WHERE id = ?', from.id); // its aliases go with it, which frees those names
+  const have = new Set([to.discord_tag, to.steam_tag, ...(await t.all('SELECT alias FROM player_aliases WHERE player_id = ?', to.id)).map(a => a.alias)]
+    .filter(Boolean).map(n => n.toLowerCase()));
+  for (const name of names) {
+    if (have.has(name.toLowerCase())) continue;
+    have.add(name.toLowerCase());
+    await t.run('INSERT INTO player_aliases (player_id, alias) VALUES (?, ?) ON CONFLICT DO NOTHING', to.id, name);
+  }
+  await t.run(`UPDATE players SET steam_tag = CASE WHEN steam_tag = '' THEN ? ELSE steam_tag END,
+    free_agent = (free_agent OR ?) AND NOT EXISTS (SELECT 1 FROM roster_slots WHERE player_id = players.id) WHERE id = ?`, from.steam_tag, from.free_agent, to.id);
 }
 
 // Asks for a profile. A newer request replaces the account's earlier open one.
@@ -274,7 +327,9 @@ export async function decideClaim(db, { claimId, approve }) {
     const claim = await t.get("SELECT * FROM profile_claims WHERE id = ? AND status = 'pending'", claimId);
     if (!claim) throw new UserError('That claim is no longer waiting.', 404);
     if (approve) {
-      await claimable(t, claim.discord_id, claim.player_id);
+      const { target, own } = await claimable(t, claim.discord_id, claim.player_id);
+      // The account already has a profile: fold it into the record they asked for.
+      if (own) await mergePlayers(t, own, target);
       await t.run('UPDATE players SET discord_id = ? WHERE id = ?', claim.discord_id, claim.player_id);
       await t.run("INSERT INTO roster_moves (player_id, discord_id, action, source) VALUES (?, ?, 'claim', 'site')", claim.player_id, claim.discord_id);
     }
@@ -287,8 +342,22 @@ export async function decideClaim(db, { claimId, approve }) {
 export const cancelClaim = async (db, { discordId, playerId }) => Boolean(await db.get(
   "DELETE FROM profile_claims WHERE discord_id = ? AND player_id = ? AND status = 'pending' RETURNING id", String(discordId), playerId));
 
-export const pendingClaims = db => db.all(`SELECT c.id, c.player_id, p.discord_tag AS tag, c.discord_id, c.discord_name, c.created_at
-  FROM profile_claims c JOIN players p ON p.id = c.player_id WHERE c.status = 'pending' ORDER BY c.id`);
+// merge_id / merge_tag: the profile the account already has. Approving folds it into the claimed
+// record. games and merge_games say how many box scores each record holds.
+export const pendingClaims = db => db.all(`SELECT c.id, c.player_id, p.discord_tag AS tag, c.discord_id, c.discord_name, c.created_at,
+    o.id AS merge_id, o.discord_tag AS merge_tag,
+    (SELECT COUNT(*)::int FROM box_scores b WHERE b.player_id = p.id) AS games,
+    (SELECT COUNT(*)::int FROM box_scores b WHERE b.player_id = o.id) AS merge_games
+  FROM profile_claims c JOIN players p ON p.id = c.player_id LEFT JOIN players o ON o.discord_id = c.discord_id
+  WHERE c.status = 'pending' ORDER BY c.id`);
+
+// Unclaimed player records, for the "find your profile" page: the names each one goes by, its
+// teams and how many box scores it has.
+export const claimCandidates = db => db.all(`SELECT p.id, p.discord_tag AS tag,
+    (SELECT COUNT(*)::int FROM box_scores b WHERE b.player_id = p.id) AS games,
+    COALESCE((SELECT string_agg(a.alias, ', ' ORDER BY lower(a.alias)) FROM player_aliases a WHERE a.player_id = p.id), '') AS aliases,
+    COALESCE((SELECT string_agg(t.name, ', ' ORDER BY t.name) FROM roster_slots rs JOIN teams t ON t.id = rs.team_id WHERE rs.player_id = p.id), '') AS teams
+  FROM players p WHERE p.discord_id IS NULL ORDER BY lower(p.discord_tag)`);
 
 // Removes a claim: by the person who made it, or by a commissioner (a wrong claim).
 export async function unclaimProfile(db, { playerId, actor }) {

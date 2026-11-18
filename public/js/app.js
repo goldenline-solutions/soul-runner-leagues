@@ -3,18 +3,24 @@ import { store, load, esc, api, $, SLOTS, setMsg, formData, currentWeek, pad2, t
 import * as v from './views.js';
 import { scorer } from './scorer.js';
 import { desk } from './desk.js';
+import { renderTicker } from './ticker.js';
 
 // [route, page title, view, options]
 //   nav:   shorter label for the nav bar
 //   under: no nav item of its own; highlights that route's item instead (league switch pages)
 //   staff: nav item only shows for the commissioner (the page itself still opens, with a login form)
 //   admin: commissioner only
+// A league's landing page. 'affiliate' is the G-League's id in the database.
+const leaguePage = id => Object.assign(() => v.league(id), { after: el => v.league.after(id, el) });
+
 const PAGES = [
   ['overview', 'About', v.overview],
-  ['premier', 'Premier Teams', () => v.teams('premier'), { nav: 'Teams' }],
-  ['affiliate', 'Affiliate Teams', () => v.teams('affiliate'), { under: 'premier' }],
+  ['premier', 'Premier League', leaguePage('premier'), { nav: 'Premier' }],
+  ['gleague', 'G-League', leaguePage('affiliate')],
+  ['premierTeams', 'Premier Teams', () => v.teams('premier'), { nav: 'Teams' }],
+  ['gleagueTeams', 'G-League Teams', () => v.teams('affiliate'), { under: 'premierTeams' }],
   ['schedule', 'Premier: Season 1', () => v.schedule('premier'), { nav: 'Schedule' }],
-  ['affiliateSchedule', 'Affiliates: Season 1', () => v.schedule('affiliate'), { under: 'schedule' }],
+  ['gleagueSchedule', 'G-League: Season 1', () => v.schedule('affiliate'), { under: 'schedule' }],
   ['standings', 'Standings', v.standingsView],
   ['stats', 'Player Stats', v.stats],
   ['awards', 'Awards Race', v.awards],
@@ -27,8 +33,10 @@ const PAGES = [
   ['game', 'Upload Results', scorer, { staff: true }],
   ['desk', "Commissioner's Desk", desk, { admin: true }],
 ];
-const HIDDEN = { box: v.box, player: v.player, team: v.team };
-const HIDDEN_UNDER = { box: 'schedule', player: 'stats', team: 'premier' };
+const HIDDEN = { box: v.box, player: v.player, team: v.team, claim: v.claimFinder };
+const HIDDEN_UNDER = { box: 'schedule', player: 'stats', team: 'premierTeams', claim: 'stats' };
+// Old addresses from before the Affiliate League became the G-League.
+const MOVED = { affiliate: 'gleagueTeams', affiliateSchedule: 'gleagueSchedule' };
 
 function parseHash() {
   const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
@@ -38,6 +46,7 @@ function parseHash() {
 
 export async function refresh() {
   await load();
+  renderTicker();
   render();
 }
 store.refresh = refresh;
@@ -64,15 +73,18 @@ function renderNav(active) {
   $('#headerMeta').classList.toggle('has-staff', admin);
   if (DESKTOP.matches) $('#nav .active')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   const { user, discord_login: discordLogin } = store.data.me;
-  // Team owners and captains log in with Discord to manage their own roster.
+  // Team owners log in with Discord to manage their own roster.
   const discord = user
     ? `<span class="muted">Logged in as ${esc(user.name)}</span> · ${store.data.me.player_id ? `<a class="muted" href="#player/${store.data.me.player_id}">My profile</a> · `
       : store.data.me.pending_id ? `<a class="muted" href="#player/${store.data.me.pending_id}">Profile claim waiting for approval</a> · `
-        : store.data.me.suggest_id ? `<a class="muted" href="#player/${store.data.me.suggest_id}">Claim your profile</a> · ` : ''}<button class="link-btn" data-discord-logout>Log out</button>`
-    : discordLogin ? '<a class="muted" href="/api/auth/discord">Team owner login (Discord)</a>' : '';
+        : `<a class="muted" href="${store.data.me.suggest_id ? `#player/${store.data.me.suggest_id}` : '#claim'}">Claim your profile</a> · `}<button class="link-btn" data-discord-logout>Log out</button>`
+    : discordLogin ? `<a class="muted" href="/api/auth/discord">${store.data.me.role_login ? 'Commissioner and team owner login (Discord)' : 'Team owner login (Discord)'}</a>` : '';
+  // A commissioner by Discord role has one login to leave (the Discord one, above); the password
+  // session has its own log out.
+  const via = store.data.me.admin_via;
   $('#footerAuth').innerHTML = [discord, admin
-    ? '<span class="muted">Commissioner mode</span> · <button class="link-btn" data-logout>Log out</button>'
-    : '<a class="muted" href="#game">Commissioner login</a>'].filter(Boolean).join(' · ');
+    ? `<span class="muted">Commissioner mode${via === 'discord' ? ' (Discord role)' : ''}</span>${via === 'discord' ? '' : ' · <button class="link-btn" data-logout>Log out</button>'}`
+    : `<a class="muted" href="#game">Commissioner login</a>${store.data.me.roles_expired ? ' · <a class="muted" href="/api/auth/discord">Log in again to renew your Discord roles</a>' : ''}`].filter(Boolean).join(' · ');
 }
 
 // "Log in with Discord", or the logged-in person's name (a link to their profile, their waiting
@@ -83,13 +95,19 @@ function discordButton(cls) {
   if (!user) return enabled ? `<a class="${cls}" href="/api/auth/discord">Log in with Discord</a>` : '';
   const profile = mine || pending || suggest;
   const title = mine ? 'Your profile' : pending ? 'Your profile claim is waiting for approval' : 'Claim your profile';
-  const name = profile ? `<a class="${cls}" href="#player/${profile}" title="${title}">${esc(user.name)}</a>` : '';
-  if (cls === 'staff-nav') return name;
-  return `${name || `<span class="${cls}">${esc(user.name)}</span>`} <button class="link-btn" data-discord-logout>Log out</button>`;
+  const name = `<a class="${cls}" href="${profile ? `#player/${profile}` : '#claim'}" title="${title}">${esc(user.name)}</a>`;
+  // Nobody's profile yet: say so next to the name, since the name alone does not look like a link to it.
+  const nudge = profile ? '' : ` <a class="${cls} claim-nudge" href="#claim">Claim your profile</a>`;
+  if (cls === 'staff-nav') return name + nudge;
+  return `${name}${nudge} <button class="link-btn" data-discord-logout>Log out</button>`;
 }
 
 function render() {
   const { name, id, query } = parseHash();
+  if (MOVED[name]) {
+    location.replace(`#${MOVED[name]}${query.size ? `?${query}` : ''}`);
+    return;
+  }
   const page = PAGES.find(p => p[0] === name);
   const view = page?.[2] || HIDDEN[name] || v.overview;
   if (page?.[3]?.admin && !store.data.me.admin) {
@@ -238,7 +256,7 @@ function openRosterEditor(teamId) {
   };
 }
 
-// ---------- roster manager for a team's owners and captains ----------
+// ---------- roster manager for a team's owners ----------
 // Sign a free agent, release a player, change a slot. src/roster.js enforces the limits.
 
 function openRosterManager(teamId, message = '') {

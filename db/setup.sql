@@ -442,12 +442,63 @@ CREATE TABLE player_aliases (
 CREATE UNIQUE INDEX player_aliases_name ON player_aliases (lower(alias));
 CREATE INDEX player_aliases_player ON player_aliases (player_id);
 
-INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql'), ('0010_free_agent_removed.sql'), ('0011_roster_moves_posted.sql'), ('0012_staff_moves.sql'), ('0013_profile_claims.sql'), ('0014_profile_claim_requests.sql'), ('0015_player_aliases.sql');
+-- ===== 0016_g_league.sql =====
+-- The second league is now called the G-League. Its id stays 'affiliate', so teams, weeks and
+-- matchups keep pointing at it.
+UPDATE leagues SET name = 'G-League', season_name = 'G-League: Season 1' WHERE id = 'affiliate';
+
+-- ===== 0017_player_photos.sql =====
+-- Player photos: the owner of a claimed profile (or the commissioner) uploads one picture. Stored
+-- in the database like team logos. players.photo_version works like teams.logo_version: it changes
+-- on every upload so /api/players/:id/photo?v=N can be cached for good; negative = no photo.
+CREATE TABLE player_photos (
+  player_id INTEGER PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL,
+  image BYTEA NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT to_char(timezone('utc', now()), 'YYYY-MM-DD HH24:MI:SS')
+);
+ALTER TABLE players ADD COLUMN photo_version INTEGER NOT NULL DEFAULT 0;
+
+-- ===== 0018_player_archetypes.sql =====
+-- AI-written archetype names, one per player per league. `signature` is the stat profile the name
+-- was written for (best skill, second skill, two-way or not): the name is only written again when
+-- that profile changes, so a player keeps their name from game to game and the model is rarely called.
+CREATE TABLE player_archetypes (
+  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  league_id TEXT NOT NULL REFERENCES leagues(id),
+  signature TEXT NOT NULL,
+  name TEXT NOT NULL,
+  tagline TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT to_char(timezone('utc', now()), 'YYYY-MM-DD HH24:MI:SS'),
+  PRIMARY KEY (player_id, league_id)
+);
+
+-- ===== 0019_player_scouting.sql =====
+-- AI-written scouting reports, one per player per league. `signature` is the body of work the
+-- report was written from (games played and the main totals): the report is written again only
+-- after a new or corrected box score. `report` is JSON.
+CREATE TABLE player_scouting (
+  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  league_id TEXT NOT NULL REFERENCES leagues(id),
+  signature TEXT NOT NULL,
+  report TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT to_char(timezone('utc', now()), 'YYYY-MM-DD HH24:MI:SS'),
+  PRIMARY KEY (player_id, league_id)
+);
+
+-- ===== 0020_user_roles.sql =====
+-- The Discord server roles a logged-in person held when last checked (a JSON array of role ids).
+-- The site reads them at "Log in with Discord": the Commissioner role opens the commissioner pages,
+-- and the Owner or Captain role together with a team's role lets them manage that team's roster.
+ALTER TABLE users ADD COLUMN discord_roles TEXT;
+ALTER TABLE users ADD COLUMN roles_checked_at TIMESTAMPTZ;
+
+INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql'), ('0010_free_agent_removed.sql'), ('0011_roster_moves_posted.sql'), ('0012_staff_moves.sql'), ('0013_profile_claims.sql'), ('0014_profile_claim_requests.sql'), ('0015_player_aliases.sql'), ('0016_g_league.sql'), ('0017_player_photos.sql'), ('0018_player_archetypes.sql'), ('0019_player_scouting.sql'), ('0020_user_roles.sql');
 
 -- ===== Season 1 data =====
 INSERT INTO leagues (id, name, season_name, blurb, sort) VALUES
   ('premier', 'Premier League', 'Premier: Season 1', '22 weekends · 132 best-of-3 matchups · First meetings and return meetings.', 1),
-  ('affiliate', 'Affiliate League', 'Affiliates: Season 1', '20 weekends · 60 best-of-3 matchups · Three matchups per weekend. Each team faces every other team four times, with one best-of-three matchup per weekend.', 2);
+  ('affiliate', 'G-League', 'G-League: Season 1', '20 weekends · 60 best-of-3 matchups · Three matchups per weekend. Each team faces every other team four times, with one best-of-three matchup per weekend.', 2);
 
 INSERT INTO teams (league_id, name) VALUES
   ('premier', 'Bangladesh'),

@@ -214,7 +214,7 @@ test('no Save button for a recorded game, a decided series, or players that fit 
   const repeat = interaction(SLASH_NAME, [png('league-3')]);
   await boxscore.handle(repeat, ctx);
   assert.deepEqual(repeat.sent[1].components, []);
-  assert.match(repeat.sent[1].content, /Duplicate game found/);
+  assert.match(repeat.sent[1].content, /Possible duplicate/);
 
   // The series stands 1-1; a third game decides it.
   const lineup = [['Ax1', 'Ax2', 'Ax3', 'Ax4', 'AI Player'], ['Hx1', 'Hx2', 'Hx3', 'Hx4', 'Hx5']];

@@ -13,7 +13,7 @@ Needs Node.js 22.13 or newer.
 3. `npm start`, then open http://localhost:8787.
 
 With no `DATABASE_URL`, it runs on an embedded Postgres in `data/pglite` (no database server
-needed). The first start loads both schedules (Premier: 22 weekends, 132 matchups; Affiliates: 20
+needed). The first start loads both schedules (Premier: 22 weekends, 132 matchups; G-League: 20
 weekends, 60 matchups), all 18 teams and the playoff bracket. Set `DATABASE_URL` to work against a
 real Postgres database instead.
 
@@ -37,7 +37,7 @@ Log in from the footer link ("Commissioner login") or the Upload Results tab.
   instantly. Recorded games can be edited or deleted from the same screen. Anyone in the box score
   who isn't on a roster yet goes into the first empty slot (PG → 7th Man) of the team they played
   for; nobody already on a roster is moved or replaced.
-- **Team cards** (Premier/Affiliate Teams → pick a team → Update Roster): owner, stream link,
+- **Team cards** (Premier/G-League Teams → pick a team → Update Roster): owner, stream link,
   affiliates and the 7 roster slots. The same dialog uploads the **team logo / mascot** (PNG, JPG or
   WebP, shrunk to 1200 px in the browser, stored in the `team_logos` table). It shows on team cards
   and as the team page banner (a blurred wash plus the logo, fading out on a curve as the page scrolls
@@ -258,7 +258,7 @@ Rosters are managed from Discord with `/roster`. It writes the same `roster_slot
 the site shows, so a signing appears on the team page at once. Code: `src/roster.js` (rules),
 `bot/roster.js` (commands and roles).
 
-**The rule:** a player is on at most one team per league. One Premier team and one Affiliate team
+**The rule:** a player is on at most one team per league. One Premier team and one G-League team
 is allowed; two teams in the same league is refused. The site's roster editor follows the same rule.
 
 **The site and Discord stay in step.** Both write the same database, so a `/roster` change shows
@@ -274,10 +274,13 @@ On the site, a commissioner opens a team's **Update Roster** dialog to: fill or 
 add or remove the team's **owners and captains** (players linked to a Discord account only). The
 bot applies the matching Discord roles.
 
-**Owners and captains on the site.** With "Log in with Discord" set up (`DISCORD_CLIENT_ID`,
-`DISCORD_CLIENT_SECRET`, `SITE_URL`; see `.env.example`), the footer shows **Team owner login
-(Discord)**. Someone who is an owner or captain of a team (`/roster staff`, or the Update Roster
-dialog) then gets a **Manage Roster** button on that team's page, with the same limits as their
+**Owners on the site.** With "Log in with Discord" set up (`DISCORD_CLIENT_ID`,
+`DISCORD_CLIENT_SECRET`, `SITE_URL`; see `.env.example`), the footer shows a Discord login link.
+With `DISCORD_GUILD_ID` set too, the login reads the member's roles in the server: the
+Commissioner role gives commissioner access with no password, and the Owner role together with a
+team's role makes them an owner of that team. Someone who is an owner of a team (by those roles,
+by `/roster staff`, or the Update Roster dialog) gets a **Manage Roster** button on that team's
+page. Captains do not, on the site or in Discord. Owners have the same limits as their
 `/roster` commands: sign a player from the free agent pool, release a player, move a player to an
 empty slot. Trades, staff changes and signing someone who is not a free agent stay with the
 commissioner. The bot applies the Discord roles for these changes like any other site change.
@@ -346,9 +349,9 @@ apply on top of it.
 | --- | --- | --- |
 | `/roster view team` | Anyone | Owner, captain, and the seven slots. |
 | `/roster freeagents` | Anyone | The free agent pool, grouped by position role (`PG`, `SG`, `SF`, `PF`, `C`: the solo queue's roles). A player with several position roles is listed under each; names are server profile names. |
-| `/roster sign team user [slot]` | Commissioner; owner or captain (free agents, own team) | Signs into the slot given, or the first empty one. Adds the team role, removes the free agent role. |
-| `/roster release user [team]` | Commissioner; owner or captain (own team) | Frees the slot and removes the team role. With no team left, the player becomes a free agent. |
-| `/roster move user team [slot]` | Commissioner; owner or captain (slot change only) | Changes teams inside a league in one step (roles swap), or changes slot on the same team. |
+| `/roster sign team user [slot]` | Commissioner; owner (free agents, own team) | Signs into the slot given, or the first empty one. Adds the team role, removes the free agent role. |
+| `/roster release user [team]` | Commissioner; owner (own team) | Frees the slot and removes the team role. With no team left, the player becomes a free agent. |
+| `/roster move user team [slot]` | Commissioner; owner (slot change only) | Changes teams inside a league in one step (roles swap), or changes slot on the same team. |
 | `/roster staff team user position` | Commissioner | Makes a member an `owner` or `captain` of a team, or `remove`s them. Gives the team role and the Owner or Captain role. |
 | `/roster freeagent user [action]` | Commissioner | Puts a member with no team in the pool and gives the free agent role. `action: remove` takes them out. |
 | `/roster link user player` | Commissioner | Connects a member to a player record that already exists, so stats and roster spot stay with them. |

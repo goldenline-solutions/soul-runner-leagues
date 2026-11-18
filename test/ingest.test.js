@@ -92,6 +92,20 @@ test('screenshot becomes a draft mapped onto the matchup, then links to the save
 
   const third = await ingestScreenshot(db, cfg, { image: png(1), series_id: series.id });
   assert.equal(third.duplicate_game_id, gameId);
+  // The refusal names the game that holds this picture, so a mix-up is easy to spot.
+  assert.equal(third.lines, undefined);
+  assert.match(third.duplicate.text, / vs .*, Weekend \d+, Game 1 \(\d+–\d+\)$/);
+  assert.equal(third.message, `This exact image is already saved as ${third.duplicate.text}.`);
+  // The commissioner can still ask for the reading (saved under the wrong game, or needed twice):
+  // no model call, the picture stays attached to the game it is saved as.
+  const forced = await ingestScreenshot(db, cfg, { image: png(1), series_id: series.id, force: true });
+  assert.equal(calls.length, before);
+  assert.equal(forced.lines.length, draft.lines.length);
+  assert.equal(forced.duplicate_game_id, gameId);
+  assert.ok(forced.warnings.some(w => /already saved as .*Game 1.*records it a second time/.test(w)));
+  const g2 = await saveGame(db, { series_id: series.id, game_number: 2, home_score: 30, away_score: 20, screenshot_id: forced.screenshot_id });
+  assert.equal((await api.gameDetail(db, gameId)).screenshot_id, draft.screenshot_id);
+  assert.equal((await api.gameDetail(db, g2)).screenshot_id, null);
 });
 
 test('integrity problems trigger one retry with feedback', async () => {
@@ -142,4 +156,34 @@ test('matching tries the matchup rosters first and never gives one player to two
   assert.equal(row('Blaze').match.how, 'exact');
   assert.equal(row('Blazer').match, null, 'Blaze is already taken by the exact row');
   assert.equal(row('Raymond Red').match, null);
+});
+
+test('a reading makes two model calls, a corrective re-read one more, and a reading out of time stops cleanly', async () => {
+  const db = await connectLocal();
+  const names = [['a1', 'a2', 'a3', 'a4', 'a5'], ['h1', 'h2', 'h3', 'h4', 'h5']];
+  // Every point from the line, so each stat row adds up and the reading counts as clean.
+  const clean = () => {
+    const e = extraction(...names);
+    for (const p of e.players) Object.assign(p.stats, { ftm: p.stats.pts, fta: p.stats.pts });
+    return e;
+  };
+  const kinds = start => calls.slice(start).map(c => c.response_format.json_schema.name).sort();
+  let start = calls.length;
+  replies.push(clean());
+  await ingestScreenshot(db, cfg, { image: png(20) });
+  assert.deepEqual(kinds(start), ['BoxScoreExtraction', 'ScreenshotValidation']);
+  // Structure and integrity problems together: one re-read, and the image is not validated again.
+  const bad = clean();
+  bad.players.pop();
+  bad.teams[1].totals.pts = 99;
+  start = calls.length;
+  replies.push(bad, clean());
+  const draft = await ingestScreenshot(db, cfg, { image: png(21) });
+  assert.deepEqual(kinds(start), ['BoxScoreExtraction', 'BoxScoreExtraction', 'ScreenshotValidation']);
+  assert.equal(draft.lines.length, 10);
+  assert.ok(!draft.warnings.some(w => /persist|Expected 10/.test(w)));
+  // No time left: no model call, a clear message, and nothing stored.
+  start = calls.length;
+  await assert.rejects(ingestScreenshot(db, { ...cfg, budgetMs: 1000 }, { image: png(22) }), /took too long/);
+  assert.equal(calls.length, start);
 });

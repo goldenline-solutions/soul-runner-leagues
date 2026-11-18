@@ -13,7 +13,7 @@ const LEAGUES = [
     teams: ['Bangladesh', 'Brazil', 'Canada', 'Egypt', 'Haiti', 'India', 'Ireland', 'Mexico', 'Saudi Arabia', 'Serbia', 'Switzerland', 'USA'],
   },
   {
-    id: 'affiliate', name: 'Affiliate League', season_name: 'Affiliates: Season 1', sort: 2,
+    id: 'affiliate', name: 'G-League', season_name: 'G-League: Season 1', sort: 2,
     blurb: '20 weekends · 60 best-of-3 matchups · Three matchups per weekend. Each team faces every other team four times, with one best-of-three matchup per weekend.',
     teams: ['Cleveland', 'Detroit', 'Las Vegas', 'Miami', 'Pittsburgh', 'San Diego'],
   },
