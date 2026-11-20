@@ -13,8 +13,9 @@ import boxscore from './boxscore.js';
 import scrim from './scrim.js';
 import solo from './solo.js';
 import roster from './roster.js';
+import gamenews from './gamenews.js';
 
-const FEATURES = [boxscore, scrim, solo, roster];
+const FEATURES = [boxscore, scrim, solo, roster, gamenews];
 // What the scrim and solo queues need in their channels (the pinned live message, the private match
 // threads), plus Manage Roles for the roster commands.
 const PERMISSIONS = P.ManageRoles | P.ViewChannel | P.SendMessages | P.EmbedLinks | P.PinMessages | P.CreatePrivateThreads | P.SendMessagesInThreads | P.ManageThreads;
@@ -39,7 +40,7 @@ const ctx = {
   db, ingest: ingestConfig(env), siteUrl: env.SITE_URL || '',
   queueChannelId: env.SCRIM_QUEUE_CHANNEL_ID || '', adminRoleId: env.SCRIM_ADMIN_ROLE_ID || '',
   soloChannelId: env.SOLO_QUEUE_CHANNEL_ID || '', freeAgentRoleId: env.FREE_AGENT_ROLE_ID || '',
-  guildId: env.DISCORD_GUILD_ID || '', rosterChannelId: env.ROSTER_LOG_CHANNEL_ID || '',
+  guildId: env.DISCORD_GUILD_ID || '', rosterChannelId: env.ROSTER_LOG_CHANNEL_ID || '', newsChannelId: env.GAME_NEWS_CHANNEL_ID || '',
   commissionerRoleId: env.COMMISSIONER_ROLE_ID || '', ownerRoleId: env.OWNER_ROLE_ID || '', captainRoleId: env.CAPTAIN_ROLE_ID || '',
 };
 if (!ctx.ingest.apiKey) console.warn('OPENAI_API_KEY is not set: /boxscore will answer that screenshot reading is not set up.');

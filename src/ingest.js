@@ -280,6 +280,17 @@ function backfillThrees(lines, warnings) {
   }
 }
 
+// player id -> the teams whose roster they are on. A player can be on a Premier team and a G-League
+// team at the same time.
+async function rosterTeams(db) {
+  const out = new Map();
+  for (const r of await db.all('SELECT player_id, team_id FROM roster_slots WHERE player_id IS NOT NULL')) {
+    if (!out.has(r.player_id)) out.set(r.player_id, []);
+    out.get(r.player_id).push(r.team_id);
+  }
+  return out;
+}
+
 // Builds the draft the Upload Results form consumes. 2K sides (AWAY/HOME) are mapped onto the
 // league matchup's home/away by roster overlap, since the screenshot does not name teams.
 export async function buildDraft(db, data, seriesId) {
@@ -287,13 +298,12 @@ export async function buildDraft(db, data, seriesId) {
   const players = await db.all('SELECT id, discord_tag, steam_tag FROM players');
   const byId = new Map(players.map(p => [p.id, p]));
   for (const a of await db.all('SELECT player_id, alias FROM player_aliases')) (byId.get(a.player_id).aliases ??= []).push(a.alias);
-  const rosterTeam = new Map((await db.all('SELECT player_id, team_id FROM roster_slots WHERE player_id IS NOT NULL'))
-    .map(r => [r.player_id, r.team_id]));
+  const teamsOf = await rosterTeams(db);
 
   const series = seriesId ? await db.get('SELECT * FROM series WHERE id = ?', seriesId) : null;
   const matchupTeams = [series?.home_team_id, series?.away_team_id].filter(Boolean);
   const roster = matchupTeams.length
-    ? new Set([...rosterTeam].filter(([, team]) => matchupTeams.includes(team)).map(([id]) => id)) : null;
+    ? new Set([...teamsOf].filter(([, teams]) => teams.some(t => matchupTeams.includes(t))).map(([id]) => id)) : null;
 
   const lines = [...(data.players || [])]
     .sort((a, b) => (a.side === b.side ? a.row_index - b.row_index : a.side === 'AWAY' ? -1 : 1))
@@ -335,9 +345,8 @@ export async function buildDraft(db, data, seriesId) {
     // score[k] counts matched players who sit on the expected roster for that mapping.
     const score = { straight: 0, swapped: 0 };
     for (const l of lines) {
-      const team = l.match && rosterTeam.get(l.match.player_id);
-      if (!team) continue;
-      const leagueSide = team === series.home_team_id ? 'HOME' : team === series.away_team_id ? 'AWAY' : null;
+      const teams = (l.match && teamsOf.get(l.match.player_id)) || [];
+      const leagueSide = teams.includes(series.home_team_id) ? 'HOME' : teams.includes(series.away_team_id) ? 'AWAY' : null;
       if (!leagueSide) continue;
       score[leagueSide === l.side2k ? 'straight' : 'swapped']++;
     }
@@ -357,36 +366,54 @@ export async function buildDraft(db, data, seriesId) {
 }
 
 // Works out which scheduled matchup a screenshot is from, for callers that can't ask (the Discord
-// bot). Each 2K side must have at least two players from one team's roster, and the two teams must
-// differ. Of the matchups between those teams, the earliest one still being played wins; if every
-// one is decided, the latest is returned with decided: true. Returns null when it can't tell.
+// bot). The screenshot does not name the teams, so they come from the rosters: every pair of teams
+// with a scheduled matchup is scored by how many of the players on each 2K side are on its
+// rosters. The best pair wins when both sides have someone, at least three players fit in all, and
+// no other pair fits as well. Of the matchups between those two teams, the earliest one still being
+// played is returned; if every one is decided, the latest, with decided: true. Null when it can't tell.
+// The result carries the games already recorded (for the Game 1 / 2 / 3 buttons).
 export async function detectSeries(db, data) {
   const draft = await buildDraft(db, data, null);
-  const rosterTeam = new Map((await db.all('SELECT player_id, team_id FROM roster_slots WHERE player_id IS NOT NULL'))
-    .map(r => [r.player_id, r.team_id]));
-  const top = side2k => {
-    const counts = new Map();
-    for (const l of draft.lines) {
-      const team = l.side2k === side2k && l.match && rosterTeam.get(l.match.player_id);
-      if (team) counts.set(team, (counts.get(team) || 0) + 1);
+  const teamsOf = await rosterTeams(db);
+  const counts = { AWAY: new Map(), HOME: new Map() };
+  for (const l of draft.lines) {
+    for (const team of (l.match && teamsOf.get(l.match.player_id)) || []) {
+      counts[l.side2k].set(team, (counts[l.side2k].get(team) || 0) + 1);
     }
-    const [first, second] = [...counts].sort((a, b) => b[1] - a[1]);
-    return first && first[1] >= 2 && first[1] > (second?.[1] ?? 0) ? first[0] : null;
-  };
-  const a = top('AWAY'), h = top('HOME');
-  if (!a || !h || a === h) return null;
+  }
+  const pairs = await db.all(`SELECT DISTINCT LEAST(home_team_id, away_team_id) AS a, GREATEST(home_team_id, away_team_id) AS b
+    FROM series WHERE home_team_id IS NOT NULL AND away_team_id IS NOT NULL`);
+  let best = null, tied = false;
+  for (const { a, b } of pairs) {
+    for (const [x, y] of [[a, b], [b, a]]) {
+      const away = counts.AWAY.get(x) || 0, home = counts.HOME.get(y) || 0;
+      if (!away || !home || away + home < 3) continue;
+      if (best && away + home === best.fit) tied = tied || best.a !== a || best.b !== b;
+      if (!best || away + home > best.fit) { best = { a, b, fit: away + home }; tied = false; }
+    }
+  }
+  if (!best || tied) return null;
+  return seriesBetween(db, best.a, best.b);
+}
 
-  const candidates = await db.all(`SELECT s.id, s.stage, s.label, l.name AS league, w.number AS week, w.date_label,
+const SERIES_INFO = `SELECT s.id, s.stage, s.label, l.name AS league, w.number AS week, w.date_label,
       th.name AS home_team, ta.name AS away_team
     FROM series s JOIN leagues l ON l.id = s.league_id LEFT JOIN weeks w ON w.id = s.week_id
-    JOIN teams th ON th.id = s.home_team_id JOIN teams ta ON ta.id = s.away_team_id
+    JOIN teams th ON th.id = s.home_team_id JOIN teams ta ON ta.id = s.away_team_id`;
+
+async function withGames(db, c) {
+  const games = await db.all('SELECT game_number, home_score, away_score, forfeit FROM games WHERE series_id = ? ORDER BY game_number', c.id);
+  const wins = checkSeries(games);
+  return { ...c, games, next_game_number: games.length + 1, decided: wins.home >= 2 || wins.away >= 2 };
+}
+
+async function seriesBetween(db, a, b) {
+  const candidates = await db.all(`${SERIES_INFO}
     WHERE (s.home_team_id = ? AND s.away_team_id = ?) OR (s.home_team_id = ? AND s.away_team_id = ?)
-    ORDER BY w.number NULLS LAST, s.id`, a, h, h, a);
+    ORDER BY w.number NULLS LAST, s.id`, a, b, b, a);
   let last = null;
   for (const c of candidates) {
-    const games = await db.all('SELECT game_number, home_score, away_score, forfeit FROM games WHERE series_id = ?', c.id);
-    const wins = checkSeries(games);
-    last = { ...c, next_game_number: games.length + 1, decided: wins.home >= 2 || wins.away >= 2 };
+    last = await withGames(db, c);
     if (!last.decided) return last;
   }
   return last;

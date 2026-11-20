@@ -146,7 +146,10 @@ function press(customId, message, { admin = true } = {}) {
   };
   return it;
 }
-const saveId = reply => reply.components[0]?.components[0].custom_id;
+const row = reply => reply.components[0]?.components ?? [];
+const saveButton = reply => row(reply).find(b => !b.disabled);
+const saveId = reply => saveButton(reply)?.custom_id;
+const labels = reply => row(reply).map(b => b.label);
 
 test('the matchup is found from the rosters, and Save records the game', async () => {
   const api = await import('../src/api.js');
@@ -163,7 +166,8 @@ test('the matchup is found from the rosters, and Save records the game', async (
   assert.ok(reply.content.includes(`Box score read: ${series.away} 40, ${series.home} 30`));
   assert.match(reply.content, /Weekend \d+ · Game 1/);
   assert.match(reply.content, /Press Save below/);
-  assert.equal(reply.components[0].components[0].label, 'Save as Game 1');
+  assert.deepEqual(labels(reply), ['Save as Game 1', 'Game 2', 'Game 3']);
+  assert.deepEqual(row(reply).map(b => Boolean(b.disabled)), [false, true, true]);
   assert.equal(saveId(reply).replace(/:[0-9]+:/, ':N:'), `box:save:N:${series.id}:1`);
 
   const outsider = press(saveId(reply), reply, { admin: false });
@@ -194,11 +198,12 @@ test('unknown names need a second press, and the next screenshot is Game 2', asy
   const read = interaction(MENU_NAME, [png('league-2')]);
   await boxscore.handle(read, ctx);
   const reply = read.sent[1];
-  assert.equal(reply.components[0].components[0].label, 'Save as Game 2');
+  // Game 1 was 40-30 to the away team; it shows as recorded, away score first like the reading.
+  assert.deepEqual(labels(reply), ['Game 1 ✓ 40-30', 'Save as Game 2', 'Game 3']);
 
   const first = press(saveId(reply), reply);
   await boxscore.handle(first, ctx);
-  assert.equal(first.sent[0].components[0].components[0].label, 'Add 1 new player (*) and save');
+  assert.deepEqual(labels(first.sent[0]), ['Add 1 new player (*) and save']);
   assert.equal((await db.get('SELECT count(*)::int AS n FROM games')).n, 1);
 
   const second = press(saveId(first.sent[0]), reply);
@@ -221,7 +226,8 @@ test('no Save button for a recorded game, a decided series, or players that fit 
   replies = [extraction(...lineup)];
   const third = interaction(SLASH_NAME, [png('league-5')]);
   await boxscore.handle(third, ctx);
-  assert.equal(third.sent[1].components[0].components[0].label, 'Save as Game 3');
+  assert.equal(saveButton(third.sent[1]).label, 'Save as Game 3');
+  assert.equal(labels(third.sent[1]).length, 3);
   await db.run('INSERT INTO games (series_id, game_number, home_score, away_score) SELECT series_id, 3, 50, 45 FROM games LIMIT 1');
   replies = [extraction(lineup[0], ['Hx1', 'Hx2', 'Hx3', 'Hx4', 'AI Player'])];
   // These teams meet again later in the season, so the next screenshot goes to that matchup.
@@ -246,4 +252,28 @@ test('no Save button for a recorded game, a decided series, or players that fit 
   await boxscore.handle(unknown, ctx);
   assert.deepEqual(unknown.sent[1].components, []);
   assert.match(unknown.sent[1].content, /Couldn't tell which matchup/);
+});
+
+test('players on a second roster (G-League and Premier) and a thin side still find the matchup', async () => {
+  const api = await import('../src/api.js');
+  const series = await db.get(`SELECT s.* FROM series s WHERE s.stage = 'regular' AND s.league_id = 'premier'
+    AND NOT EXISTS (SELECT 1 FROM roster_slots r WHERE r.team_id IN (s.home_team_id, s.away_team_id) AND r.player_id IS NOT NULL)
+    ORDER BY s.id LIMIT 1`);
+  await api.updateTeam(db, series.home_team_id, { roster: { PG: 'Dual1', SG: 'Dual2', SF: 'Dual3' } });
+  await api.updateTeam(db, series.away_team_id, { roster: { PG: 'Solo1' } });
+  // The same three also play for a G-League team.
+  const g = await db.get("SELECT id FROM teams WHERE league_id = 'affiliate' ORDER BY id LIMIT 1");
+  await api.updateTeam(db, g.id, { roster: { PG: 'Dual1', SG: 'Dual2', SF: 'Dual3' } });
+
+  replies = [extraction(['Solo1', 'New1', 'New2', 'New3', 'New4'], ['Dual1', 'Dual2', 'Dual3', 'New5', 'New6'])];
+  const read = interaction(SLASH_NAME, [png('dual-1')]);
+  await boxscore.handle(read, ctx);
+  assert.equal(saveId(read.sent[1]).split(':')[3], String(series.id));
+  assert.deepEqual(labels(read.sent[1]), ['Save as Game 1', 'Game 2', 'Game 3']);
+
+  // One known player on each side is not enough to go on.
+  replies = [extraction(['Solo1', 'N1', 'N2', 'N3', 'N4'], ['Dual1', 'N5', 'N6', 'N7', 'N8'])];
+  const thin = interaction(SLASH_NAME, [png('dual-2')]);
+  await boxscore.handle(thin, ctx);
+  assert.deepEqual(thin.sent[1].components, []);
 });

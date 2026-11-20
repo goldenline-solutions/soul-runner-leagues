@@ -1,9 +1,10 @@
 // Box score reading from Discord. Two ways in, one pipeline (src/ingest.js):
 //   /boxscore screenshot:<image>                     slash command
 //   right-click a message -> Apps -> Read box score  message command
-// The reading is stored (so the same image is never paid for twice) and the matchup is worked out
-// from the players. Nothing is saved as a game until a commissioner presses the Save button under
-// the reading, or saves it in Upload Results on the site.
+// The reading is stored (so the same image is never paid for twice) and the two teams and their
+// scheduled matchup are worked out from the players. Under the reading sit Game 1 / 2 / 3 buttons:
+// games already recorded show their score, and the next one saves. Nothing is saved as a game until
+// a commissioner presses it, or saves the reading in Upload Results on the site.
 import { UserError } from '../src/league.js';
 import { ingestScreenshot, storedDraft } from '../src/ingest.js';
 import { recordGame } from '../src/api.js';
@@ -80,7 +81,7 @@ export function formatReading(r, { siteUrl = '' } = {}) {
   const head = `**Box score read: ${title}**${r.cached ? ' (read earlier, no new model call)' : ''}${where ? `\n${where}` : ''}`;
   const onSite = site ? `in Upload Results: ${site}/#game` : 'in Upload Results on the site';
   // Kept to one line: the Save button replaces the last line of the message.
-  const foot = saveButton(r)
+  const foot = gameButtons(r)
     ? `Not saved yet. Press Save below, or fix names and stats first ${onSite}`
     : `Not saved yet. ${sr ? '' : "Couldn't tell which matchup this is from the players. "}Review and save it ${onSite}`;
 
@@ -101,16 +102,24 @@ export function formatReading(r, { siteUrl = '' } = {}) {
 
 const button = (label, customId, style) => ({ type: 1, components: [{ type: 2, style, label, custom_id: customId }] });
 
-// A Save button only when the matchup is known, still open, and this isn't a game already recorded.
-function saveButton(r) {
+// One button per game of the best-of-three, only when the matchup is known, still open, and this
+// isn't a game already recorded. Recorded games show their score (away first, like the reading),
+// the next game is the Save button, and a later game waits for the one before it.
+function gameButtons(r) {
   const sr = r.series;
   if (!sr || sr.decided || r.duplicate_game_id) return null;
-  return button(`Save as Game ${sr.next_game_number}`, `${PREFIX}save:${r.screenshot_id}:${sr.id}:${sr.next_game_number}`, 3);
+  const components = [1, 2, 3].map(n => {
+    const played = (sr.games || []).find(g => g.game_number === n);
+    if (played) return { type: 2, style: 2, disabled: true, custom_id: `${PREFIX}done:${n}`, label: `Game ${n} ✓ ${played.away_score}-${played.home_score}` };
+    if (n === sr.next_game_number) return { type: 2, style: 3, custom_id: `${PREFIX}save:${r.screenshot_id}:${sr.id}:${n}`, label: `Save as Game ${n}` };
+    return { type: 2, style: 2, disabled: true, custom_id: `${PREFIX}wait:${n}`, label: `Game ${n}` };
+  });
+  return { type: 1, components };
 }
 
 export function readingPayload(r, opts) {
-  const save = r.lines && saveButton(r);
-  return { content: formatReading(r, opts), components: save ? [save] : [], allowedMentions: { parse: [] } };
+  const games = r.lines && gameButtons(r);
+  return { content: formatReading(r, opts), components: games ? [games] : [], allowedMentions: { parse: [] } };
 }
 
 // The Save button. Saving creates any player the league doesn't know yet, so with unknown names the

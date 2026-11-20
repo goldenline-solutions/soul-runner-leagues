@@ -113,11 +113,14 @@ Then, in Discord:
 
 The bot replies with both teams' lines and anything to check.
 
-- **It finds the matchup itself.** When each side of the screenshot has at least two players from
-  one team's roster, the bot picks the earliest matchup between those two teams that is still being
-  played, names the teams and flips the sides if needed.
-- **Save as Game N.** With a matchup found, the reply has a Save button. Only members with
-  **Manage Server** can press it. If the box score has names the league doesn't know (marked `*`),
+- **It finds the teams and the matchup itself.** The screenshot doesn't name the teams, so the bot
+  takes them from the rosters: of every pair of teams with a scheduled matchup, the one whose
+  rosters fit the two sides best (someone on each side, at least three players in all). It then
+  picks the earliest matchup between those two teams that is still being played, names the teams
+  and flips the sides if needed.
+- **Game 1 / 2 / 3 buttons.** With a matchup found, the reply has one button per game of the
+  series: games already recorded show their score, the next one is **Save as Game N**, and a later
+  game waits for the one before it. Only members with **Manage Server** can press Save. If the box score has names the league doesn't know (marked `*`),
   the first press turns the button into "Add N new players and save", because saving creates
   those players; fix a misread name in Upload Results instead.
 - **No button** when the bot can't tell the matchup, the series is already decided, or the same
@@ -127,6 +130,15 @@ The bot replies with both teams' lines and anything to check.
 
 Both commands start limited to members with **Manage Server**; change who can use them in Server
 Settings → Integrations.
+
+**Game recaps.** With `GAME_NEWS_CHANNEL_ID` set to a news channel, the bot posts a short recap of
+every game saved, whether with the Save button or in Upload Results on the site (picked up within
+20 seconds): the result, where the series stands, the top performers with season context (season
+highs, double-doubles, league scoring rank) and both teams' place in the standings. With
+`OPENAI_API_KEY` set the headline and recap are written by the model from those facts (player names
+are not sent to it); without it the bot writes a plain one. A game is posted once, so later
+corrections to it are not posted again, and games from before this was set up are never posted.
+The bot needs **View Channel**, **Send Messages** and **Embed Links** in that channel.
 
 **Keeping it running.** On the league server the bot runs under pm2 as `soulrunner-bot` and comes
 back after a reboot with the rest of the pm2 list. After changing bot code: `pm2 restart soulrunner-bot`.
@@ -460,7 +472,7 @@ src/scrim.js           scrim queue: join/leave, the matcher, accept, report, con
 src/solo.js            solo queue: position seating, accept, report
 src/roster.js          roster rules: sign, release, move, free agents
 src/discord-oauth.js   "Log in with Discord" for the site
-bot/                   Discord bot: index.js (startup, routing), boxscore.js (screenshot reading), scrim.js (scrim queue), solo.js (solo queue), roster.js (rosters and roles)
+bot/                   Discord bot: index.js (startup, routing), boxscore.js (screenshot reading), scrim.js (scrim queue), solo.js (solo queue), roster.js (rosters and roles), gamenews.js (game recaps)
 migrations/            schema, applied in order
 db/setup.sql           whole database in one script (generated)
 scripts/               db:setup, db:sql, db:backup

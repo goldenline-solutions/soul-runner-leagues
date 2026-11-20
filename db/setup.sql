@@ -493,7 +493,16 @@ CREATE TABLE player_scouting (
 ALTER TABLE users ADD COLUMN discord_roles TEXT;
 ALTER TABLE users ADD COLUMN roles_checked_at TIMESTAMPTZ;
 
-INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql'), ('0010_free_agent_removed.sql'), ('0011_roster_moves_posted.sql'), ('0012_staff_moves.sql'), ('0013_profile_claims.sql'), ('0014_profile_claim_requests.sql'), ('0015_player_aliases.sql'), ('0016_g_league.sql'), ('0017_player_photos.sql'), ('0018_player_archetypes.sql'), ('0019_player_scouting.sql'), ('0020_user_roles.sql');
+-- ===== 0021_game_news.sql =====
+-- Game recaps in Discord: the bot posts a short game and series summary in the news channel for
+-- every game saved, on the site or with the bot's Save button (bot/gamenews.js).
+
+-- False until the bot has handled the game. Games from before this migration count as handled.
+ALTER TABLE games ADD COLUMN news_posted BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE games ALTER COLUMN news_posted SET DEFAULT FALSE;
+CREATE INDEX games_news_unposted ON games (id) WHERE NOT news_posted;
+
+INSERT INTO _migrations (name) VALUES ('0001_init.sql'), ('0002_screenshots.sql'), ('0003_team_logos.sql'), ('0004_scrim_queue.sql'), ('0005_scrim_box_scores.sql'), ('0006_solo_queue.sql'), ('0007_solo_box_scores.sql'), ('0008_roster_management.sql'), ('0009_team_staff.sql'), ('0010_free_agent_removed.sql'), ('0011_roster_moves_posted.sql'), ('0012_staff_moves.sql'), ('0013_profile_claims.sql'), ('0014_profile_claim_requests.sql'), ('0015_player_aliases.sql'), ('0016_g_league.sql'), ('0017_player_photos.sql'), ('0018_player_archetypes.sql'), ('0019_player_scouting.sql'), ('0020_user_roles.sql'), ('0021_game_news.sql');
 
 -- ===== Season 1 data =====
 INSERT INTO leagues (id, name, season_name, blurb, sort) VALUES
